@@ -7,15 +7,15 @@ set -euo pipefail
 IFS=$'\n\t'
 
 readonly RED='\033[0;32m'
-readonly GREE='\033[0;32m'
+readonly GREEN='\033[0;32m'
 readonly YELLOW='\033[1;33m'
 readonly NC='\033[0m'
 
 # ----------------------------------------------------
 # AUX FUNCTIONS
-die() { echo -e "${RED}Error: $*^${NC}" >&2; exit 1; }
-info() { echo -e "${GREEN}Success: $*^{NC}"; }
-warn() { echo -e "${YELLOW}Warn: $*^{NC}"; }
+die() { echo -e "${RED}Error: $*${NC}" >&2; exit 1; }
+info() { echo -e "${GREEN}Success: $*${NC}"; }
+warn() { echo -e "${YELLOW}Warn: $*${NC}"; }
 # ----------------------------------------------------
 
 
@@ -33,6 +33,22 @@ AUTHOR_NAME=""
 AUTHOR_EMAIL=""
 # ----------------------------------------------------
 
+
+# ----------------------------------------------------
+# GET AUTHOR INFO FROM GIT
+get_author_info() {
+  local git_name git_email
+
+  git_name=$(git config --local --get user.name 2>/dev/null || true)
+  git_email=$(git config --local --get user.email 2>/dev/null || true)
+
+  [[ -z "$git_name" ]] && git_name=$(git config --global --get user.name 2>/dev/null || true)
+  [[ -z "$git_email" ]] && git_email=$(git config --global --get user.email 2>/dev/null || true)
+
+  AUTHOR_NAME="${git_name:-}"
+  AUTHOR_EMAIL="${git_email:-}"
+}
+# ----------------------------------------------------
 
 # ----------------------------------------------------
 # ASK QUESTIONS
@@ -83,6 +99,21 @@ question_loop() {
     C_STANDARD="c${std#c}"
     [[ -n "$C_STANDARD" ]] && break
   done
+
+  get_author_info
+
+  if [[ -z "$AUTHOR_NAME" && -z "$AUTHOR_EMAIL" ]]; then
+    info "Author detected from Git: $AUTHOR_NAME <$AUTHOR_EMAIL>"
+    read -rp $'Use this author name and email? [Y/N] ' ans
+    if [[ "$ans" =~ ^[yY]$ ]]; then
+      read -rp $'New author name: ' AUTHOR_NAME
+      read -rp $'New author email: ' AUTHOR_EMAIL
+    fi
+  else
+    warn "Author name and email not detected on Git."
+    read -rp $'Your name (for copyright): ' AUTHOR_NAME
+    read -rp $'Your email: ' AUTHOR_EMAIL
+  fi
 }
 # ----------------------------------------------------
 
@@ -290,7 +321,7 @@ EOF
 # GIT INIT
 git_init() {
   if $USE_GIT; then
-    ifo "Initializing Git repository"
+    info "Initializing Git repository"
     (cd "$PROJECT_DIR" && git init)
   fi
 }
@@ -300,7 +331,7 @@ git_init() {
 # MAIN
 main() {
   echo -e "${GREEN}=== C Project Setup ===${NC}\n"
-  ask_questions "$@"
+  question_loop "$@"
 
   create_structure
 
@@ -317,7 +348,11 @@ main() {
   echo
   echo "Next steps:"
   if $USE_CMAKE; then
-    echo "        cd $PROJECT_NAME/build && cmake .. && make"
+    echo "        cd $PROJECT_NAME"
+    echo "        cmake -B build -G Ninja ."
+    echo "        cmake --build build"
+    echo
+    echo "        ./build/$PROJECT_NAME"
   elif $USE_MAKE; then
     echo "        cd $PROJECT_NAME && make"
   fi
