@@ -23,6 +23,7 @@ warn() { echo -e "${YELLOW}Warn: $*${NC}"; }
 # PROJECT VARIABLES
 PROJECT_NAME=""
 PROJECT_DIR=""
+USE_MESON=false
 USE_CMAKE=false
 USE_MAKE=false
 USE_GIT=false
@@ -72,12 +73,13 @@ question_loop() {
 
   # Build system
   echo -e "\nChoose a build system:"
-  select build in "CMake + Ninja (recommended)" "Makefile" "Both" "None"; do
+  select build in "Meson + Ninja (default)" "CMake + Ninja" "Makefile" "All" "None"; do
     case $REPLY in
-      1) USE_CMAKE=true; break;;
-      2) USE_MAKE=true; break;;
-      3) USE_CMAKE=true; USE_MAKE=true; break;;
-      4) break;;
+      1) USE_MESON=true; break;;
+      2) USE_CMAKE=true; break;;
+      3) USE_MAKE=true; break;;
+      4) USE_MESON=true; USE_CMAKE=true; USE_MAKE=true; break;;
+      5) break;;
       *) warn "Invalid option. Please, insert a valid one.";;
     esac
   done
@@ -132,10 +134,14 @@ Description of the project.
 ## Build
 
 \`\`\`bash
-mkdir build && cd build
 EOF
 
-  if $USE_CMAKE; then
+  if $USE_MESON; then
+    cat >> "$PROJECT_DIR/README.md" <<EOF
+meson setup builddir
+meson compile -C builddir
+EOF
+  elif $USE_CMAKE; then
     cat >> "$PROJECT_DIR/README.md" <<EOF
 cmake -B build -G Ninja . # Only the first time or if you change the CMakeLists.txt
 cmake --build build
@@ -144,7 +150,7 @@ EOF
     echo "make" >> "$PROJECT_DIR/README.md"
   fi
 
-  echo "\`\`\`" > "$PROJECT_DIR/README.md"
+  echo "\`\`\`" >> "$PROJECT_DIR/README.md"
 
   cat >> "$PROJECT_DIR/README.md" <<EOF
 ## Autor
@@ -154,6 +160,7 @@ EOF
   touch "$PROJECT_DIR/.gitignore"
   cat > "$PROJECT_DIR/.gitignore" <<EOF
 build/
+builddir/
 *.o
 *.a
 *.so
@@ -165,6 +172,9 @@ CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake
 compile_commands.json
+# Meson build directories
+meson-private/
+meson-logs/
 EOF
 }
 # ----------------------------------------------------
@@ -252,25 +262,74 @@ EOF
 # ----------------------------------------------------
 
 # ----------------------------------------------------
-# .clang-format SETUP (BASED ON LLVM)
+# MESON BUILD SETUP
+create_meson() {
+  info "Generating meson.build"
+  cat > "$PROJECT_DIR/meson.build" <<EOF
+project('$PROJECT_NAME', 'c',
+  version: '1.0.0',
+  default_options: [
+    'warning_level=3',
+    'c_std=$C_STANDARD'
+  ]
+)
+
+executable(
+  '$PROJECT_NAME',
+  sources: files('src/main.c'),
+  include_directories: include_directories('include'),
+  install: true,
+)
+
+# Enable tests if requested
+option('enable_tests', type: 'boolean', value: false, description: 'Enable tests compilation')
+
+if get_option('enable_tests')
+  subdir('tests')
+endif
+EOF
+}
+# ----------------------------------------------------
+
+# ----------------------------------------------------
+# .clang-format SETUP (CUSTOM RULES)
 create_clang_format() {
   info "Generating .clang-format"
   cat > "$PROJECT_DIR/.clang-format" <<EOF
-BasedOnStyle: LLVM
+BasedOnStyle: GNU
 IndentWidth: 4
-TabWidth: 4
-UseTab: Never
-ColumnLimit: 100
-BreakBeforeBraces: Attach
-AllowShortIfStatementsOnASingleLine: false
-IndentCaseLabels: false
-BinPackArguments: false
-BinPackParameters: false
-SpaceBeforeParens: ControlStatements
-SortIncludes: true
 
-# Other Adjustments
-PointerAlignment: Left
+# --- Regras de Chaves e Espaços (Anteriores) ---
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterControlStatement: false # if (cond) {
+  AfterFunction: true # int \n func() \n {
+  BeforeElse: false # } else {
+  AfterStruct: true
+  AfterEnum: true
+
+SpaceBeforeParens: Always
+AlwaysBreakAfterReturnType: AllDefinitions
+
+# --- Novas Regras de Alinhamento (Colunas) ---
+
+# Alinha os valores de atribuição consecutivos (o sinal de =)
+AlignConsecutiveAssignments:
+  Enabled: true
+  AcrossEmptyLines: false
+  AcrossComments: false
+
+# Alinha as declarações de variáveis (os nomes das variáveis)
+AlignConsecutiveDeclarations:
+  Enabled: true
+
+# Alinha comentários à direita do código
+AlignTrailingComments:
+  Kind: Always
+  OverEmptyLines: 1
+
+# Garante que o caractere '*' do ponteiro fique junto ao nome da variável: int *ptr
+PointerAlignment: Right
 EOF
 }
 # ----------------------------------------------------
@@ -335,6 +394,7 @@ main() {
 
   create_structure
 
+  $USE_MESON && create_meson
   $USE_MAKE && create_makefile
   $USE_CMAKE && create_cmake
   $USE_CLANG_FORMAT && create_clang_format
@@ -347,7 +407,13 @@ main() {
   echo "        $PROJECT_DIR"
   echo
   echo "Next steps:"
-  if $USE_CMAKE; then
+  if $USE_MESON; then
+    echo "        cd $PROJECT_NAME"
+    echo "        meson setup builddir"
+    echo "        meson compile -C builddir"
+    echo
+    echo "        ./builddir/$PROJECT_NAME"
+  elif $USE_CMAKE; then
     echo "        cd $PROJECT_NAME"
     echo "        cmake -B build -G Ninja ."
     echo "        cmake --build build"

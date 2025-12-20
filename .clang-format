@@ -1,0 +1,34 @@
+BasedOnStyle: GNU
+IndentWidth: 4
+
+# --- Regras de Chaves e Espaços (Anteriores) ---
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterControlStatement: false # if (cond) {
+  AfterFunction: true # int \n func() \n {
+  BeforeElse: false # } else {
+  AfterStruct: true
+  AfterEnum: true
+
+SpaceBeforeParens: Always
+AlwaysBreakAfterReturnType: AllDefinitions
+
+# --- Novas Regras de Alinhamento (Colunas) ---
+
+# Alinha os valores de atribuição consecutivos (o sinal de =)
+AlignConsecutiveAssignments:
+  Enabled: true
+  AcrossEmptyLines: false
+  AcrossComments: false
+
+# Alinha as declarações de variáveis (os nomes das variáveis)
+AlignConsecutiveDeclarations:
+  Enabled: true
+
+# Alinha comentários à direita do código
+AlignTrailingComments:
+  Kind: Always
+  OverEmptyLines: 1
+
+# Garante que o caractere '*' do ponteiro fique junto ao nome da variável: int *ptr
+PointerAlignment: Right
