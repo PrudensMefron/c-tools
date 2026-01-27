@@ -296,39 +296,51 @@ EOF
 create_clang_format() {
   info "Generating .clang-format"
   cat > "$PROJECT_DIR/.clang-format" <<EOF
+---
 BasedOnStyle: GNU
 IndentWidth: 4
+ColumnLimit: 80
 
-# --- Regras de Chaves e Espaços (Anteriores) ---
+# --- Regras de Espaçamento antes de Parênteses ---
+# Garante o espaço em: if (, while (, chamadas de função e declarações.
+SpaceBeforeParens: Custom
+SpaceBeforeParensOptions:
+  AfterControlStatements: true
+  AfterFunctionDeclarationName: true
+  AfterFunctionDefinitionName: true
+  AfterIfMacros: true
+  AfterOverloadedOperator: true
+  BeforeNonEmptyParentheses: true
+
+# --- Padrão GNU de Quebra de Linha ---
+AlwaysBreakAfterReturnType: AllDefinitions
 BreakBeforeBraces: Custom
 BraceWrapping:
-  AfterControlStatement: false # if (cond) {
-  AfterFunction: true # int \n func() \n {
-  BeforeElse: false # } else {
+  AfterControlStatement: MultiLine # Permite '{' na mesma linha se o if for simples, ou segue GNU se complexo
+  AfterFunction: true # A chave sempre quebra linha após a função (Padrão GNU)
+  BeforeElse: false
   AfterStruct: true
   AfterEnum: true
 
-SpaceBeforeParens: Always
-AlwaysBreakAfterReturnType: AllDefinitions
+# --- Alinhamento de Parâmetros Longos ---
+# Impede que o clang-format tente "empacotar" muitos parâmetros na mesma linha
+BinPackParameters: false
+AlignAfterOpenBracket: Align
 
-# --- Novas Regras de Alinhamento (Colunas) ---
-
-# Alinha os valores de atribuição consecutivos (o sinal de =)
+# --- Alinhamento de Atribuições e Declarações ---
 AlignConsecutiveAssignments:
   Enabled: true
   AcrossEmptyLines: false
   AcrossComments: false
 
-# Alinha as declarações de variáveis (os nomes das variáveis)
 AlignConsecutiveDeclarations:
   Enabled: true
 
-# Alinha comentários à direita do código
 AlignTrailingComments:
   Kind: Always
   OverEmptyLines: 1
 
-# Garante que o caractere '*' do ponteiro fique junto ao nome da variável: int *ptr
+# Garante que o '*' fique junto ao nome: int *ptr
 PointerAlignment: Right
 EOF
 }
