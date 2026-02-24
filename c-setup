@@ -1,28 +1,174 @@
 #!/usr/bin/env bash
-# C-Setup bash script
+# C/C++-Setup bash script
 # Author: PrudensMefron
-# Usage: c_setup <path>
+# Usage: c_setup [options] [project_name]
 
 set -euo pipefail
 IFS=$'\n\t'
 
-readonly RED='\033[0;32m'
+readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
 readonly YELLOW='\033[1;33m'
 readonly NC='\033[0m'
 
 # ----------------------------------------------------
-# AUX FUNCTIONS
-die() { echo -e "${RED}Error: $*${NC}" >&2; exit 1; }
-info() { echo -e "${GREEN}Success: $*${NC}"; }
-warn() { echo -e "${YELLOW}Warn: $*${NC}"; }
-# ----------------------------------------------------
+# CONFIGURATION TEMPLATES (Organized for easy modification)
 
+# --- CLANG-FORMAT ---
+CLANG_FORMAT_C='---
+BasedOnStyle: GNU
+IndentWidth: 4
+ColumnLimit: 80
+SpaceBeforeParens: Custom
+SpaceBeforeParensOptions:
+  AfterControlStatements: true
+  AfterFunctionDeclarationName: true
+  AfterFunctionDefinitionName: true
+  AfterIfMacros: true
+  AfterOverloadedOperator: true
+  BeforeNonEmptyParentheses: true
+AlwaysBreakAfterReturnType: AllDefinitions
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterControlStatement: MultiLine
+  AfterFunction: true
+  BeforeElse: false
+  AfterStruct: true
+  AfterEnum: true
+BinPackParameters: false
+AlignAfterOpenBracket: Align
+AlignConsecutiveAssignments:
+  Enabled: true
+  AcrossEmptyLines: false
+  AcrossComments: false
+AlignConsecutiveDeclarations:
+  Enabled: true
+AlignTrailingComments:
+  Kind: Always
+  OverEmptyLines: 1
+PointerAlignment: Right
+'
+
+CLANG_FORMAT_CPP='---
+BasedOnStyle: LLVM
+IndentWidth: 4
+ColumnLimit: 100
+BreakBeforeBraces: Allman
+AllowShortFunctionsOnASingleLine: None
+NamespaceIndentation: All
+'
+
+# --- CLANG-TIDY ---
+CLANG_TIDY_BASE='Checks: >
+  bugprone-*,
+  clang-analyzer-*,
+  cppcoreguidelines-*,
+  modernize-*,
+  performance-*,
+  portability-*,
+  readability-*
+WarningsAsErrors: ""
+HeaderFilterRegex: ".*"
+FormatStyle: file
+'
+
+# --- MESON TEMPLATES ---
+MESON_ROOT_BASE="project('{PROJECT_NAME}', {LANG_LIST},
+  version: '1.0.0',
+  default_options: [
+    'warning_level=3',
+    {STD_OPTIONS}
+  ]
+)
+
+subdir('src')"
+
+MESON_SRC_BASE="executable(
+  '{PROJECT_NAME}',
+  sources: files({SOURCES}),
+  include_directories: include_directories('../include'),
+  install: true,
+)"
+
+# --- CMAKE TEMPLATE ---
+CMAKE_BASE='cmake_minimum_required(VERSION 3.16)
+project({PROJECT_NAME} LANGUAGES {LANG_LIST} VERSION 1.0.0)
+
+{STD_CONFIG}
+
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+add_compile_options(-Wall -Wextra -Wpedantic)
+
+file(GLOB_RECURSE SOURCES "src/*.c" "src/*.cpp")
+add_executable(${PROJECT_NAME} ${SOURCES})
+target_include_directories(${PROJECT_NAME} PRIVATE include)
+'
+
+# --- MAKEFILE TEMPLATE ---
+MAKEFILE_BASE='CC := {CC}
+CXX := {CXX}
+CFLAGS := -Wall -Wextra -Wpedantic {C_STD} -Iinclude
+CXXFLAGS := -Wall -Wextra -Wpedantic {CPP_STD} -Iinclude
+LDFLAGS :=
+SRC := src
+OBJ := obj
+BIN := bin
+TARGET := {PROJECT_NAME}
+
+SOURCES := $(wildcard $(SRC)/*.c) $(wildcard $(SRC)/*.cpp)
+OBJECTS := $(patsubst $(SRC)/%.c,$(OBJ)/%.o,$(patsubst $(SRC)/%.cpp,$(OBJ)/%.o,$(SOURCES)))
+
+.PHONY: all clean run debug
+
+all: $(BIN)/$(TARGET)
+
+$(BIN)/$(TARGET): $(OBJECTS) | $(BIN)
+	$(CC) $(LDFLAGS) -o $@ $^
+
+$(OBJ)/%.o: $(SRC)/%.c | $(OBJ)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(OBJ)/%.o: $(SRC)/%.cpp | $(OBJ)
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(BIN) $(OBJ):
+	mkdir -p $@
+
+clean:
+	rm -rf $(OBJ) $(BIN)
+
+run: all
+	./$(BIN)/$(TARGET)
+'
+
+# --- MAIN FILES ---
+MAIN_C='#include <stdio.h>
+
+int main(int argc, char *argv[])
+{
+    (void)argc;
+    (void)argv;
+    printf("Hello from C project: {PROJECT_NAME}!\\n");
+    return 0;
+}
+'
+
+MAIN_CPP='#include <iostream>
+
+int main(int argc, char *argv[])
+{
+    (void)argc;
+    (void)argv;
+    std::cout << "Hello from C++ project: {PROJECT_NAME}!" << std::endl;
+    return 0;
+}
+'
 
 # ----------------------------------------------------
-# PROJECT VARIABLES
+# PROJECT STATE VARIABLES
 PROJECT_NAME=""
 PROJECT_DIR=""
+LANG_CHOICE="" # "c", "cpp", "both"
 USE_MESON=false
 USE_CMAKE=false
 USE_MAKE=false
@@ -30,9 +176,23 @@ USE_GIT=false
 USE_CLANG_FORMAT=false
 USE_CLANG_TIDY=false
 C_STANDARD="c11"
+CPP_STANDARD="c++17"
 AUTHOR_NAME=""
 AUTHOR_EMAIL=""
+
+# PIPELINE FLAGS
+FLAG_BUILD_ONLY=false
+FLAG_LANG_ONLY=false
+FLAG_GIT_ONLY=false
+FLAG_FORMAT_ONLY=false
+FLAG_FULL_SETUP=true
 # ----------------------------------------------------
+
+# ----------------------------------------------------
+# AUX FUNCTIONS
+die() { echo -e "${RED}Error: $*${NC}" >&2; exit 1; }
+info() { echo -e "${GREEN}Success: $*${NC}"; }
+warn() { echo -e "${YELLOW}Warn: $*${NC}"; }
 
 
 # ----------------------------------------------------
@@ -49,29 +209,24 @@ get_author_info() {
   AUTHOR_NAME="${git_name:-}"
   AUTHOR_EMAIL="${git_email:-}"
 }
-# ----------------------------------------------------
 
 # ----------------------------------------------------
-# ASK QUESTIONS
-question_loop() {
-  
-  # Project name
-  if [[ $# -eq 1 ]] && [[ -n "$1" ]]; then
-    PROJECT_NAME="$1"
-  else
-    read -rp "Project name: " PROJECT_NAME
-  fi
-  [[ -z "$PROJECT_NAME" ]] && die "Project name is needed."
-  
-  PROJECT_DIR="$(pwd)/$PROJECT_NAME"
+# MODULAR QUESTIONS
 
-  if [[ -e "$PROJECT_DIR" && -d "$PROJECT_DIR" ]]; then
-    if [[ -n "$(ls -A "$PROJECT_DIR" 2>/dev/null)" ]]; then
-      die "The dir '$PROJECT_NAME' already exist and is not empty."
-    fi
-  fi
+ask_language() {
+  [[ -n "$LANG_CHOICE" ]] && return
+  echo -e "\nChoose language:"
+  select opt in "C" "C++" "Both (C & C++)"; do
+    case $REPLY in
+      1) LANG_CHOICE="c"; break;;
+      2) LANG_CHOICE="cpp"; break;;
+      3) LANG_CHOICE="both"; break;;
+      *) warn "Invalid option.";;
+    esac
+  done
+}
 
-  # Build system
+ask_build_system() {
   echo -e "\nChoose a build system:"
   select build in "Meson + Ninja (default)" "CMake + Ninja" "Makefile" "All" "None"; do
     case $REPLY in
@@ -80,85 +235,144 @@ question_loop() {
       3) USE_MAKE=true; break;;
       4) USE_MESON=true; USE_CMAKE=true; USE_MAKE=true; break;;
       5) break;;
-      *) warn "Invalid option. Please, insert a valid one.";;
+      *) warn "Invalid option.";;
     esac
   done
+}
 
-  # Git
-  read -rp $'\nInitialize a blank Git repository? [Y\N] ' ans
+ask_git() {
+  read -rp $'\nInitialize a blank Git repository? [Y/N] ' ans
   [[ "$ans" =~ ^([yY]|$) ]] && USE_GIT=true
+}
 
-  # Clang LSP & Formater
-  read -rp $'\nAdd .clang-format? (LLVM style) [Y/N] ' ans
+ask_format() {
+  read -rp $'\nAdd .clang-format? [Y/N] ' ans
   [[ "$ans" =~ ^([yY]|$) ]] && USE_CLANG_FORMAT=true
   
   read -rp $'\nAdd .clang-tidy? [Y/N] ' ans
   [[ "$ans" =~ ^([yY]|$) ]] && USE_CLANG_TIDY=true
+}
 
-  # C standard
-  echo -e "\nSelect C standard:"
-  select std in "c89" "c99" "c11" "c17" "c23"; do
-    C_STANDARD="c${std#c}"
-    [[ -n "$C_STANDARD" ]] && break
-  done
+ask_standards() {
+  if [[ "$LANG_CHOICE" == "c" || "$LANG_CHOICE" == "both" ]]; then
+    echo -e "\nSelect C standard:"
+    select std in "c89" "c99" "c11" "c17" "c23"; do
+      C_STANDARD="c${std#c}"; [[ -n "$C_STANDARD" ]] && break
+    done
+  fi
+  if [[ "$LANG_CHOICE" == "cpp" || "$LANG_CHOICE" == "both" ]]; then
+    echo -e "\nSelect C++ standard:"
+    select std in "c++11" "c++14" "c++17" "c++20" "c++23"; do
+      CPP_STANDARD="${std}"; [[ -n "$CPP_STANDARD" ]] && break
+    done
+  fi
+}
 
+ask_author() {
   get_author_info
-
-  if [[ -z "$AUTHOR_NAME" && -z "$AUTHOR_EMAIL" ]]; then
-    info "Author detected from Git: $AUTHOR_NAME <$AUTHOR_EMAIL>"
-    read -rp $'Use this author name and email? [Y/N] ' ans
-    if [[ "$ans" =~ ^[yY]$ ]]; then
+  if [[ -n "$AUTHOR_NAME" ]]; then
+    info "Author detected: $AUTHOR_NAME <$AUTHOR_EMAIL>"
+    read -rp $'Use this author info? [Y/N] ' ans
+    if [[ ! "$ans" =~ ^([yY]|$) ]]; then
       read -rp $'New author name: ' AUTHOR_NAME
       read -rp $'New author email: ' AUTHOR_EMAIL
     fi
   else
-    warn "Author name and email not detected on Git."
-    read -rp $'Your name (for copyright): ' AUTHOR_NAME
+    warn "Author info not detected."
+    read -rp $'Your name: ' AUTHOR_NAME
     read -rp $'Your email: ' AUTHOR_EMAIL
+  fi
+}
+
+# ----------------------------------------------------
+# USAGE
+usage() {
+  echo "Usage: c_setup [options] [project_name]"
+  echo "Options:"
+  echo "  -b, --build   Setup only the build system (Meson, CMake, or Makefile)"
+  echo "  -l, --lang    Setup only the language (C, C++, or both) and main file"
+  echo "  -g, --git     Initialize a Git repository only"
+  echo "  -f, --format  Setup Clang-format and Clang-tidy only"
+  echo "  -h, --help    Show this help message"
+  echo ""
+  echo "If no options are provided, a full interactive setup will run."
+  exit 0
+}
+
+# ----------------------------------------------------
+# ARGUMENT PARSING
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -b|--build) FLAG_BUILD_ONLY=true; FLAG_FULL_SETUP=false; shift ;;
+      -l|--lang) 
+        if [[ -n "${2:-}" && ! "$2" =~ ^- ]]; then
+          LANG_CHOICE="$2"; shift 2
+        else
+          FLAG_LANG_ONLY=true; FLAG_FULL_SETUP=false; shift
+        fi
+        ;;
+      -g|--git) FLAG_GIT_ONLY=true; FLAG_FULL_SETUP=false; shift ;;
+      -f|--format) FLAG_FORMAT_ONLY=true; FLAG_FULL_SETUP=false; shift ;;
+      -h|--help) usage ;;
+      -*) die "Unknown option: $1. Use -h for help." ;;
+      *) 
+        if [[ -z "$PROJECT_NAME" ]]; then
+          PROJECT_NAME="$1"
+          shift
+        else
+          die "Multiple project names provided: $PROJECT_NAME and $1"
+        fi
+        ;;
+    esac
+  done
+
+  # Project name/directory logic
+  if [[ -z "$PROJECT_NAME" ]]; then
+    if $FLAG_FULL_SETUP; then
+      read -rp "Project name: " PROJECT_NAME
+      [[ -z "$PROJECT_NAME" ]] && die "Project name is required."
+    else
+      PROJECT_NAME=$(basename "$(pwd)")
+    fi
+  fi
+
+  if [[ "$PROJECT_NAME" == "$(basename "$(pwd)")" ]]; then
+    PROJECT_DIR="$(pwd)"
+  else
+    PROJECT_DIR="$(pwd)/$PROJECT_NAME"
+    if [[ -d "$PROJECT_DIR" && -n "$(ls -A "$PROJECT_DIR" 2>/dev/null)" ]]; then
+        die "Directory '$PROJECT_NAME' already exists and is not empty."
+    fi
   fi
 }
 # ----------------------------------------------------
 
 
 # ----------------------------------------------------
-# FOLDER STRUCTURE
+# FILE CREATION HELPERS
 create_structure() {
-  info "Creating dir structures in $PROJECT_DIR"
+  info "Creating directory structure in $PROJECT_DIR"
   mkdir -p "$PROJECT_DIR"/{src,include,tests,build,docs,external}
 
   cat > "$PROJECT_DIR/README.md" <<EOF
 # $PROJECT_NAME
+Created by $AUTHOR_NAME <$AUTHOR_EMAIL>
 
-Description of the project.
-
-## Build
-
-\`\`\`bash
+## Build Instructions
 EOF
 
   if $USE_MESON; then
     cat >> "$PROJECT_DIR/README.md" <<EOF
+\`\`\`bash
 meson setup builddir
 meson compile -C builddir
+./builddir/$PROJECT_NAME
+\`\`\`
 EOF
-  elif $USE_CMAKE; then
-    cat >> "$PROJECT_DIR/README.md" <<EOF
-cmake -B build -G Ninja . # Only the first time or if you change the CMakeLists.txt
-cmake --build build
-EOF
-  elif $USE_MAKE; then
-    echo "make" >> "$PROJECT_DIR/README.md"
   fi
 
-  echo "\`\`\`" >> "$PROJECT_DIR/README.md"
-
-  cat >> "$PROJECT_DIR/README.md" <<EOF
-## Autor
-$AUTHOR_NAME <$AUTHOR_EMAIL>
-EOF
-  
-  touch "$PROJECT_DIR/.gitignore"
-  cat > "$PROJECT_DIR/.gitignore" <<EOF
+  cat >> "$PROJECT_DIR/.gitignore" <<EOF
 build/
 builddir/
 *.o
@@ -172,219 +386,98 @@ CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake
 compile_commands.json
-# Meson build directories
 meson-private/
 meson-logs/
 EOF
 }
-# ----------------------------------------------------
 
-# ----------------------------------------------------
-# MAKEFILE CONFIG
 create_makefile() {
   info "Generating Makefile"
-  cat > "$PROJECT_DIR/Makefile" <<EOF
-# Variables
-CC := gcc
-CFLAGS := -Wall -Wextra -Wpedantic -std=$C_STANDARD -Iinclude
-LDFLAGS :=
-SRC := src
-OBJ := obj
-BIN := bin
-TARGET := $PROJECT_NAME
-
-SOURCES := \$(wildcard \$(src)/.*.c)
-OBJECTS := \$(SOURCES:\$(SRC)/%.c=\$(OBJ)/%.o)
-
-.PHONY: all clean run debug
-
-all: \$(BIN)/\$(TARGET)
-\$(BIN)/\$(TARGET): $(OBJECTS) | \$(BIN)
-  \$(CC) \$(LDFLAGS) -o \$@ \$^
-
-\$(OBJ)/%.o: \$(SRC)/%.c | \$(OBJ)
-  \$(CC) \$(CFLAGS) -c \$< -o \$@
-
-\$(BIN) \$(OBJ):
-  mkdir -p \$@
-
-clean:
-  rm -rf \$(OBJ) \$(BIN)
-
-run: all
-  ./\$(BIN)/\$(TARGET)
-
-debug: CFLAGS += -g -O0
-debug: all
-  gdb \$(BIN)/\$(TARGET)
-EOF
+  local cc="gcc" cxx="g++"
+  [[ "$LANG_CHOICE" == "cpp" ]] && cc="g++"
   
+  local content="$MAKEFILE_BASE"
+  content="${content//{PROJECT_NAME\}/$PROJECT_NAME}"
+  content="${content//{CC\}/$cc}"
+  content="${content//{CXX\}/$cxx}"
+  content="${content//{C_STD\}/-std=$C_STANDARD}"
+  content="${content//{CPP_STD\}/-std=$CPP_STANDARD}"
+  echo "$content" > "$PROJECT_DIR/Makefile"
   mkdir -p "$PROJECT_DIR"/{obj,bin}
 }
-# ----------------------------------------------------
 
-# ----------------------------------------------------
-# CMakeLists.txt SETUP
 create_cmake() {
-  info "Generating CMakeLists.txt with Ninja configs"
-  cat > "$PROJECT_DIR/CMakeLists.txt" <<EOF
-cmake_minimum_required(VERSION 3.16)
-project($PROJECT_NAME LANGUAGES C VERSION 1.0.0)
+  info "Generating CMakeLists.txt"
+  local lang_list="C"
+  [[ "$LANG_CHOICE" == "cpp" ]] && lang_list="CXX"
+  [[ "$LANG_CHOICE" == "both" ]] && lang_list="C CXX"
 
-set(CMAKE_C_STANDARD $C_STANDARD)
-set(CMAKE_C_STANDARD_REQUIRED ON)
-set(CMAKE_C_EXTENSIONS OFF)
+  local std_config="set(CMAKE_C_STANDARD ${C_STANDARD#c})\nset(CMAKE_C_STANDARD_REQUIRED ON)"
+  [[ "$LANG_CHOICE" == "cpp" ]] && std_config="set(CMAKE_CXX_STANDARD ${CPP_STANDARD#c++})\nset(CMAKE_CXX_STANDARD_REQUIRED ON)"
+  [[ "$LANG_CHOICE" == "both" ]] && std_config="set(CMAKE_C_STANDARD ${C_STANDARD#c})\nset(CMAKE_CXX_STANDARD ${CPP_STANDARD#c++})\nset(CMAKE_C_STANDARD_REQUIRED ON)\nset(CMAKE_CXX_STANDARD_REQUIRED ON)"
 
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-
-add_compile_options(-Wall -Wextra -Wpedantic)
-
-# Main target
-file(GLOB_RECURSE SOURCES "src/*.c")
-add_executable(\${PROJECT_NAME} \${SOURCES})
-target_include_directories(\${PROJECT_NAME} PRIVATE include)
-
-# Link compile_commands.json with root
-add_custom_command(TARGET \${PROJECT_NAME} POST_BUILD
-  COMMAND \${CMAKE_COMMAND} -E copy_if_different
-    \${CMAKE_BINARY_DIR}/compile_commands.json
-    \${CMAKE_SOURCE_DIR}/compile_commands.json
-)
-
-# Tests (OPTIONAL - using CTest + Unity or CMockery)
-option(ENABLE_TESTS "Enable tests compilation" OFF)
-IF(ENABLE_TESTS)
-  enable_testing()
-  add_subdirectory(tests)
-endif()
-EOF
+  local content="$CMAKE_BASE"
+  content="${content//{PROJECT_NAME\}/$PROJECT_NAME}"
+  content="${content//{LANG_LIST\}/$lang_list}"
+  content="${content//{STD_CONFIG\}/$std_config}"
+  echo -e "$content" > "$PROJECT_DIR/CMakeLists.txt"
 }
-# ----------------------------------------------------
 
-# ----------------------------------------------------
-# MESON BUILD SETUP
 create_meson() {
-  info "Generating meson.build"
-  cat > "$PROJECT_DIR/meson.build" <<EOF
-project('$PROJECT_NAME', 'c',
-  version: '1.0.0',
-  default_options: [
-    'warning_level=3',
-    'c_std=$C_STANDARD'
-  ]
-)
+  info "Generating Meson build files"
+  local lang_list="'c'"
+  local std_opts="'c_std=$C_STANDARD'"
+  local sources="'main.c'"
 
-executable(
-  '$PROJECT_NAME',
-  sources: files('src/main.c'),
-  include_directories: include_directories('include'),
-  install: true,
-)
+  if [[ "$LANG_CHOICE" == "cpp" ]]; then
+    lang_list="'cpp'"
+    std_opts="'cpp_std=$CPP_STANDARD'"
+    sources="'main.cpp'"
+  elif [[ "$LANG_CHOICE" == "both" ]]; then
+    lang_list="'c', 'cpp'"
+    std_opts="'c_std=$C_STANDARD', 'cpp_std=$CPP_STANDARD'"
+    sources="'main.cpp'" # Default entry for both is .cpp
+  fi
 
-# Enable tests if requested
-option('enable_tests', type: 'boolean', value: false, description: 'Enable tests compilation')
+  # Root meson.build
+  local root_content="$MESON_ROOT_BASE"
+  root_content="${root_content//{PROJECT_NAME\}/$PROJECT_NAME}"
+  root_content="${root_content//{LANG_LIST\}/$lang_list}"
+  root_content="${root_content//{STD_OPTIONS\}/$std_opts}"
+  echo "$root_content" > "$PROJECT_DIR/meson.build"
 
-if get_option('enable_tests')
-  subdir('tests')
-endif
-EOF
+  # src/meson.build
+  local src_content="$MESON_SRC_BASE"
+  src_content="${src_content//{PROJECT_NAME\}/$PROJECT_NAME}"
+  src_content="${src_content//{SOURCES\}/$sources}"
+  echo "$src_content" > "$PROJECT_DIR/src/meson.build"
 }
-# ----------------------------------------------------
 
-# ----------------------------------------------------
-# .clang-format SETUP (CUSTOM RULES)
 create_clang_format() {
   info "Generating .clang-format"
-  cat > "$PROJECT_DIR/.clang-format" <<EOF
----
-BasedOnStyle: GNU
-IndentWidth: 4
-ColumnLimit: 80
-
-# --- Regras de Espaçamento antes de Parênteses ---
-# Garante o espaço em: if (, while (, chamadas de função e declarações.
-SpaceBeforeParens: Custom
-SpaceBeforeParensOptions:
-  AfterControlStatements: true
-  AfterFunctionDeclarationName: true
-  AfterFunctionDefinitionName: true
-  AfterIfMacros: true
-  AfterOverloadedOperator: true
-  BeforeNonEmptyParentheses: true
-
-# --- Padrão GNU de Quebra de Linha ---
-AlwaysBreakAfterReturnType: AllDefinitions
-BreakBeforeBraces: Custom
-BraceWrapping:
-  AfterControlStatement: MultiLine # Permite '{' na mesma linha se o if for simples, ou segue GNU se complexo
-  AfterFunction: true # A chave sempre quebra linha após a função (Padrão GNU)
-  BeforeElse: false
-  AfterStruct: true
-  AfterEnum: true
-
-# --- Alinhamento de Parâmetros Longos ---
-# Impede que o clang-format tente "empacotar" muitos parâmetros na mesma linha
-BinPackParameters: false
-AlignAfterOpenBracket: Align
-
-# --- Alinhamento de Atribuições e Declarações ---
-AlignConsecutiveAssignments:
-  Enabled: true
-  AcrossEmptyLines: false
-  AcrossComments: false
-
-AlignConsecutiveDeclarations:
-  Enabled: true
-
-AlignTrailingComments:
-  Kind: Always
-  OverEmptyLines: 1
-
-# Garante que o '*' fique junto ao nome: int *ptr
-PointerAlignment: Right
-EOF
+  local content="$CLANG_FORMAT_C"
+  # Use C++ style (Allman) if project includes C++
+  [[ "$LANG_CHOICE" == "cpp" || "$LANG_CHOICE" == "both" ]] && content="$CLANG_FORMAT_CPP"
+  echo "$content" > "$PROJECT_DIR/.clang-format"
 }
-# ----------------------------------------------------
 
-# ----------------------------------------------------
-# .clang-tidy SETUP (BASED ON LLVM)
 create_clang_tidy() {
   info "Generating .clang-tidy"
-  cat > "$PROJECT_DIR/.clang-tidy" <<EOF
-Checks: >
-  bugprone-*,
-  clang-analyzer-*,
-  cppcoreguidelines-*,
-  modernize-*,
-  performance-*,
-  portability-*,
-  readability-*
-WarningsAsErrors: ''
-HeaderFilterRegex: '.*'
-FormatStyle: file
-CheckOptions:
-  - key:             readability-braces-around-statements.ShortStatementLines
-    value:           camelCase
-EOF
+  echo "$CLANG_TIDY_BASE" > "$PROJECT_DIR/.clang-tidy"
 }
-# ----------------------------------------------------
 
-# ----------------------------------------------------
-# INITAL main.c FILE
 create_main() {
-  info "Generating main.c"
-  cat > "$PROJECT_DIR/src/main.c" <<EOF
-#include <stdio.h>
-
-int main(int argc, char *argv[])
-{
-  (void)argc;
-  (void)argv;
-
-  printf("Olá, $PROJECT_NAME!\\n");
-  return 0;
-}
-EOF
+  info "Generating source files"
+  if [[ "$LANG_CHOICE" == "c" ]]; then
+    local content="${MAIN_C//{PROJECT_NAME\}/$PROJECT_NAME}"
+    echo "$content" > "$PROJECT_DIR/src/main.c"
+  elif [[ "$LANG_CHOICE" == "cpp" ]]; then
+    local content="${MAIN_CPP//{PROJECT_NAME\}/$PROJECT_NAME}"
+    echo "$content" > "$PROJECT_DIR/src/main.cpp"
+  elif [[ "$LANG_CHOICE" == "both" ]]; then
+    local content_cpp="${MAIN_CPP//{PROJECT_NAME\}/$PROJECT_NAME}"
+    echo "$content_cpp" > "$PROJECT_DIR/src/main.cpp"
+  fi
 }
 # ----------------------------------------------------
 
@@ -392,20 +485,22 @@ EOF
 # GIT INIT
 git_init() {
   if $USE_GIT; then
-    info "Initializing Git repository"
+    info "Initializing Git repository in $PROJECT_DIR"
     (cd "$PROJECT_DIR" && git init)
   fi
 }
-# ----------------------------------------------------
 
 # ----------------------------------------------------
-# MAIN
-main() {
-  echo -e "${GREEN}=== C Project Setup ===${NC}\n"
-  question_loop "$@"
+# PIPELINES
+pipeline_full() {
+  ask_language
+  ask_build_system
+  ask_git
+  ask_format
+  ask_standards
+  ask_author
 
   create_structure
-
   $USE_MESON && create_meson
   $USE_MAKE && create_makefile
   $USE_CMAKE && create_cmake
@@ -414,29 +509,50 @@ main() {
   
   create_main
   git_init
-
-  info "Project $PROJECT_NAME created successfully in:"
-  echo "        $PROJECT_DIR"
-  echo
-  echo "Next steps:"
-  if $USE_MESON; then
-    echo "        cd $PROJECT_NAME"
-    echo "        meson setup builddir"
-    echo "        meson compile -C builddir"
-    echo
-    echo "        ./builddir/$PROJECT_NAME"
-  elif $USE_CMAKE; then
-    echo "        cd $PROJECT_NAME"
-    echo "        cmake -B build -G Ninja ."
-    echo "        cmake --build build"
-    echo
-    echo "        ./build/$PROJECT_NAME"
-  elif $USE_MAKE; then
-    echo "        cd $PROJECT_NAME && make"
-  fi
-  echo
 }
+
+pipeline_build() {
+  ask_language
+  ask_build_system
+  mkdir -p "$PROJECT_DIR"/{src,include}
+  $USE_MESON && create_meson
+  $USE_MAKE && create_makefile
+  $USE_CMAKE && create_cmake
+}
+
+pipeline_format() {
+  ask_language
+  ask_format
+  mkdir -p "$PROJECT_DIR"
+  $USE_CLANG_FORMAT && create_clang_format
+  $USE_CLANG_TIDY && create_clang_tidy
+}
+
+pipeline_lang() {
+  ask_language
+  mkdir -p "$PROJECT_DIR/src"
+  create_main
+}
+
 # ----------------------------------------------------
+# MAIN
+main() {
+  parse_args "$@"
+
+  echo -e "${GREEN}=== C/C++ Project Setup ===${NC}\n"
+
+  if $FLAG_FULL_SETUP; then
+    pipeline_full
+  else
+    if $FLAG_BUILD_ONLY; then pipeline_build; fi
+    if $FLAG_LANG_ONLY; then pipeline_lang; fi
+    if $FLAG_GIT_ONLY; then USE_GIT=true; git_init; fi
+    if $FLAG_FORMAT_ONLY; then pipeline_format; fi
+  fi
+
+  info "Project operation completed successfully."
+  echo "Location: $PROJECT_DIR"
+}
 
 # ENTRY POINT
 main "$@"
