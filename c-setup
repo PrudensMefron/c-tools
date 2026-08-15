@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# C/C++-Setup bash script
+# Allman++ C/C++ Project Setup
 # Author: PrudensMefron
-# Usage: c_setup [options] [project_name]
+# Usage: c-setup [options] [project_name]
 
 set -euo pipefail
 IFS=$'\n\t'
@@ -14,48 +14,82 @@ readonly NC='\033[0m'
 # ----------------------------------------------------
 # CONFIGURATION TEMPLATES (Organized for easy modification)
 
-# --- CLANG-FORMAT ---
-CLANG_FORMAT_C='---
-BasedOnStyle: GNU
+# --- CLANG-FORMAT: ALLMAN++ ---
+# A custom C/C++ style designed to stay readable while keeping the editor out
+# of the way during normal typing.
+CLANG_FORMAT_ALLMAN_PP='---
+# Allman++
+# Base: LLVM, with custom brace, spacing and wrapping rules.
+BasedOnStyle: LLVM
+
+# Indentation
 IndentWidth: 4
-ColumnLimit: 80
-SpaceBeforeParens: Custom
-SpaceBeforeParensOptions:
-  AfterControlStatements: true
-  AfterFunctionDeclarationName: true
-  AfterFunctionDefinitionName: true
-  AfterIfMacros: true
-  AfterOverloadedOperator: true
-  BeforeNonEmptyParentheses: true
-AlwaysBreakAfterReturnType: AllDefinitions
+ContinuationIndentWidth: 4
+ConstructorInitializerIndentWidth: 4
+TabWidth: 4
+UseTab: Never
+AccessModifierOffset: -4
+
+# Line width
+ColumnLimit: 100
+
+# Allman braces, except namespaces stay compact: namespace foo {
 BreakBeforeBraces: Custom
 BraceWrapping:
-  AfterControlStatement: MultiLine
-  AfterFunction: true
-  BeforeElse: false
-  AfterStruct: true
+  AfterCaseLabel: true
+  AfterClass: true
+  AfterControlStatement: Always
   AfterEnum: true
-BinPackParameters: false
-AlignAfterOpenBracket: Align
-AlignConsecutiveAssignments:
-  Enabled: true
-  AcrossEmptyLines: false
-  AcrossComments: false
-AlignConsecutiveDeclarations:
-  Enabled: true
-AlignTrailingComments:
-  Kind: Always
-  OverEmptyLines: 1
-PointerAlignment: Right
-'
+  AfterFunction: true
+  AfterNamespace: false
+  AfterStruct: true
+  AfterUnion: true
+  AfterExternBlock: true
+  BeforeCatch: true
+  BeforeElse: true
+  BeforeWhile: true
+  IndentBraces: false
+  SplitEmptyFunction: false
+  SplitEmptyRecord: false
+  SplitEmptyNamespace: false
 
-CLANG_FORMAT_CPP='---
-BasedOnStyle: LLVM
-IndentWidth: 4
-ColumnLimit: 100
-BreakBeforeBraces: Allman
-AllowShortFunctionsOnASingleLine: None
-NamespaceIndentation: All
+# Prefer: foo (), if (condition), while (condition), etc.
+SpaceBeforeParens: Always
+
+# C++ pointer/reference style: Type* ptr, Type& ref
+DerivePointerAlignment: false
+PointerAlignment: Left
+ReferenceAlignment: Left
+
+# Short constructs may stay on one line when they fit naturally.
+AllowShortBlocksOnASingleLine: Always
+AllowShortFunctionsOnASingleLine: All
+AllowShortIfStatementsOnASingleLine: AllIfsAndElse
+AllowShortLoopsOnASingleLine: true
+AllowShortLambdasOnASingleLine: All
+AllowShortCaseLabelsOnASingleLine: false
+
+# Long argument/parameter lists: one item per line rather than bin-packing.
+BinPackArguments: false
+BinPackParameters: false
+AllowAllArgumentsOnNextLine: false
+AllowAllParametersOfDeclarationOnNextLine: false
+AlignAfterOpenBracket: false
+
+# Constructor initializer lists: deliberately vertical, aka tax-return mode.
+BreakConstructorInitializers: BeforeColon
+PackConstructorInitializers: Never
+
+# switch/case
+IndentCaseLabels: true
+IndentCaseBlocks: true
+
+# Namespace contents are not indented.
+NamespaceIndentation: None
+
+# Avoid unrelated formatter churn.
+SortIncludes: Never
+ReflowComments: false
 '
 
 # --- CLANG-TIDY ---
@@ -71,6 +105,35 @@ WarningsAsErrors: ""
 HeaderFilterRegex: ".*"
 FormatStyle: file
 '
+
+
+# --- ZED PROJECT SETTINGS ---
+# Keep normal indentation assistance, but disable LSP on-type formatting so
+# clangd does not rearrange braces/whitespace while code is still being typed.
+ZED_SETTINGS_ALLMAN_PP='{
+  "languages": {
+    "C": {
+      "tab_size": 4,
+      "hard_tabs": false,
+      "preferred_line_length": 100,
+      "soft_wrap": "none",
+      "auto_indent": true,
+      "use_on_type_format": false,
+      "format_on_save": "off",
+      "formatter": "language_server"
+    },
+    "C++": {
+      "tab_size": 4,
+      "hard_tabs": false,
+      "preferred_line_length": 100,
+      "soft_wrap": "none",
+      "auto_indent": true,
+      "use_on_type_format": false,
+      "format_on_save": "off",
+      "formatter": "language_server"
+    }
+  }
+}'
 
 # --- MESON TEMPLATES ---
 MESON_ROOT_BASE="project('{PROJECT_NAME}', {LANG_LIST},
@@ -100,8 +163,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 add_compile_options(-Wall -Wextra -Wpedantic)
 
 file(GLOB_RECURSE SOURCES "src/*.c" "src/*.cpp")
-add_executable(${PROJECT_NAME} ${SOURCES})
-target_include_directories(${PROJECT_NAME} PRIVATE include)
+add_executable({PROJECT_NAME} ${SOURCES})
+target_include_directories({PROJECT_NAME} PRIVATE include)
 '
 
 # --- MAKEFILE TEMPLATE ---
@@ -144,18 +207,18 @@ run: all
 # --- MAIN FILES ---
 MAIN_C='#include <stdio.h>
 
-int main(int argc, char *argv[])
+int main (int argc, char* argv[])
 {
     (void)argc;
     (void)argv;
-    printf("Hello from C project: {PROJECT_NAME}!\\n");
+    printf ("Hello from C project: {PROJECT_NAME}!\\n");
     return 0;
 }
 '
 
 MAIN_CPP='#include <iostream>
 
-int main(int argc, char *argv[])
+int main (int argc, char* argv[])
 {
     (void)argc;
     (void)argv;
@@ -175,6 +238,7 @@ USE_MAKE=false
 USE_GIT=false
 USE_CLANG_FORMAT=false
 USE_CLANG_TIDY=false
+USE_ZED_SETTINGS=false
 C_STANDARD="c11"
 CPP_STANDARD="c++17"
 AUTHOR_NAME=""
@@ -242,15 +306,24 @@ ask_build_system() {
 
 ask_git() {
   read -rp $'\nInitialize a blank Git repository? [Y/N] ' ans
-  [[ "$ans" =~ ^([yY]|$) ]] && USE_GIT=true
+  if [[ "$ans" =~ ^([yY]|$) ]]; then
+    USE_GIT=true
+  fi
+  return 0
 }
 
 ask_format() {
-  read -rp $'\nAdd .clang-format? [Y/N] ' ans
-  [[ "$ans" =~ ^([yY]|$) ]] && USE_CLANG_FORMAT=true
-  
+  read -rp $'\nAdd Allman++ .clang-format? [Y/N] ' ans
+  if [[ "$ans" =~ ^([yY]|$) ]]; then
+    USE_CLANG_FORMAT=true
+    USE_ZED_SETTINGS=true
+  fi
+
   read -rp $'\nAdd .clang-tidy? [Y/N] ' ans
-  [[ "$ans" =~ ^([yY]|$) ]] && USE_CLANG_TIDY=true
+  if [[ "$ans" =~ ^([yY]|$) ]]; then
+    USE_CLANG_TIDY=true
+  fi
+  return 0
 }
 
 ask_standards() {
@@ -287,12 +360,12 @@ ask_author() {
 # ----------------------------------------------------
 # USAGE
 usage() {
-  echo "Usage: c_setup [options] [project_name]"
+  echo "Usage: allman++ [options] [project_name]"
   echo "Options:"
   echo "  -b, --build   Setup only the build system (Meson, CMake, or Makefile)"
   echo "  -l, --lang    Setup only the language (C, C++, or both) and main file"
   echo "  -g, --git     Initialize a Git repository only"
-  echo "  -f, --format  Setup Clang-format and Clang-tidy only"
+  echo "  -f, --format  Setup Allman++ Clang-format, Zed settings, and Clang-tidy only"
   echo "  -h, --help    Show this help message"
   echo ""
   echo "If no options are provided, a full interactive setup will run."
@@ -389,6 +462,15 @@ compile_commands.json
 meson-private/
 meson-logs/
 EOF
+
+  if $USE_CLANG_FORMAT; then
+    cat >> "$PROJECT_DIR/README.md" <<EOF
+
+## Code Style
+This project uses the **Allman++** C/C++ style defined in \`.clang-format\`.
+Local Zed settings disable on-type formatting and format-on-save so formatting happens explicitly.
+EOF
+  fi
 }
 
 create_makefile() {
@@ -454,11 +536,14 @@ create_meson() {
 }
 
 create_clang_format() {
-  info "Generating .clang-format"
-  local content="$CLANG_FORMAT_C"
-  # Use C++ style (Allman) if project includes C++
-  [[ "$LANG_CHOICE" == "cpp" || "$LANG_CHOICE" == "both" ]] && content="$CLANG_FORMAT_CPP"
-  echo "$content" > "$PROJECT_DIR/.clang-format"
+  info "Generating .clang-format with Allman++ style"
+  echo "$CLANG_FORMAT_ALLMAN_PP" > "$PROJECT_DIR/.clang-format"
+}
+
+create_zed_settings() {
+  info "Generating Zed project settings for Allman++"
+  mkdir -p "$PROJECT_DIR/.zed"
+  echo "$ZED_SETTINGS_ALLMAN_PP" > "$PROJECT_DIR/.zed/settings.json"
 }
 
 create_clang_tidy() {
@@ -505,6 +590,7 @@ pipeline_full() {
   $USE_MAKE && create_makefile
   $USE_CMAKE && create_cmake
   $USE_CLANG_FORMAT && create_clang_format
+  $USE_ZED_SETTINGS && create_zed_settings
   $USE_CLANG_TIDY && create_clang_tidy
   
   create_main
@@ -518,6 +604,7 @@ pipeline_build() {
   $USE_MESON && create_meson
   $USE_MAKE && create_makefile
   $USE_CMAKE && create_cmake
+  return 0
 }
 
 pipeline_format() {
@@ -525,7 +612,9 @@ pipeline_format() {
   ask_format
   mkdir -p "$PROJECT_DIR"
   $USE_CLANG_FORMAT && create_clang_format
+  $USE_ZED_SETTINGS && create_zed_settings
   $USE_CLANG_TIDY && create_clang_tidy
+  return 0
 }
 
 pipeline_lang() {
@@ -539,7 +628,7 @@ pipeline_lang() {
 main() {
   parse_args "$@"
 
-  echo -e "${GREEN}=== C/C++ Project Setup ===${NC}\n"
+  echo -e "${GREEN}=== Allman++ C/C++ Project Setup ===${NC}\n"
 
   if $FLAG_FULL_SETUP; then
     pipeline_full
