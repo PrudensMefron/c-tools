@@ -1,34 +1,71 @@
-BasedOnStyle: GNU
-IndentWidth: 4
+---
+BasedOnStyle: LLVM
 
-# --- Regras de Chaves e Espaços (Anteriores) ---
+# Indentation
+IndentWidth: 4
+ContinuationIndentWidth: 4
+ConstructorInitializerIndentWidth: 4
+TabWidth: 4
+UseTab: Never
+AccessModifierOffset: -4
+
+# Let the programmer decide where expressions are broken.
+# The editor still displays a preferred 100-column limit.
+ColumnLimit: 0
+
+# Allman braces, except namespaces.
 BreakBeforeBraces: Custom
 BraceWrapping:
-  AfterControlStatement: false # if (cond) {
-  AfterFunction: true # int \n func() \n {
-  BeforeElse: false # } else {
-  AfterStruct: true
+  AfterCaseLabel: true
+  AfterClass: true
+  AfterControlStatement: Always
   AfterEnum: true
+  AfterFunction: true
+  AfterNamespace: false
+  AfterStruct: true
+  AfterUnion: true
+  AfterExternBlock: true
+  BeforeCatch: true
+  BeforeElse: true
+  BeforeWhile: true
+  IndentBraces: false
+  SplitEmptyFunction: false
+  SplitEmptyRecord: false
+  SplitEmptyNamespace: false
 
+# foo (), if (), while (), etc.
 SpaceBeforeParens: Always
-AlwaysBreakAfterReturnType: AllDefinitions
 
-# --- Novas Regras de Alinhamento (Colunas) ---
+# Type* ptr, Type& ref
+DerivePointerAlignment: false
+PointerAlignment: Left
+ReferenceAlignment: Left
 
-# Alinha os valores de atribuição consecutivos (o sinal de =)
-AlignConsecutiveAssignments:
-  Enabled: true
-  AcrossEmptyLines: false
-  AcrossComments: false
+# Do not aggressively collapse constructs.
+AllowShortBlocksOnASingleLine: Never
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: true
+AllowShortLoopsOnASingleLine: false
+AllowShortLambdasOnASingleLine: None
+AllowShortCaseLabelsOnASingleLine: false
 
-# Alinha as declarações de variáveis (os nomes das variáveis)
-AlignConsecutiveDeclarations:
-  Enabled: true
+# Once argument/parameter lists are broken, keep them vertical.
+BinPackArguments: false
+BinPackParameters: false
+AllowAllArgumentsOnNextLine: false
+AllowAllParametersOfDeclarationOnNextLine: false
+AlignAfterOpenBracket: false
 
-# Alinha comentários à direita do código
-AlignTrailingComments:
-  Kind: Always
-  OverEmptyLines: 1
+# Constructor initializer lists.
+BreakConstructorInitializers: BeforeColon
+PackConstructorInitializers: Never
 
-# Garante que o caractere '*' do ponteiro fique junto ao nome da variável: int *ptr
-PointerAlignment: Right
+# switch/case
+IndentCaseLabels: true
+IndentCaseBlocks: true
+
+# namespace foo {
+NamespaceIndentation: None
+
+SortIncludes: Never
+ReflowComments: false

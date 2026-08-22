@@ -18,8 +18,6 @@ readonly NC='\033[0m'
 # A custom C/C++ style designed to stay readable while keeping the editor out
 # of the way during normal typing.
 CLANG_FORMAT_ALLMAN_PP='---
-# Allman++
-# Base: LLVM, with custom brace, spacing and wrapping rules.
 BasedOnStyle: LLVM
 
 # Indentation
@@ -30,10 +28,11 @@ TabWidth: 4
 UseTab: Never
 AccessModifierOffset: -4
 
-# Line width
-ColumnLimit: 100
+# Let the programmer decide where expressions are broken.
+# The editor still displays a preferred 100-column limit.
+ColumnLimit: 0
 
-# Allman braces, except namespaces stay compact: namespace foo {
+# Allman braces, except namespaces.
 BreakBeforeBraces: Custom
 BraceWrapping:
   AfterCaseLabel: true
@@ -53,30 +52,30 @@ BraceWrapping:
   SplitEmptyRecord: false
   SplitEmptyNamespace: false
 
-# Prefer: foo (), if (condition), while (condition), etc.
+# foo (), if (), while (), etc.
 SpaceBeforeParens: Always
 
-# C++ pointer/reference style: Type* ptr, Type& ref
+# Type* ptr, Type& ref
 DerivePointerAlignment: false
 PointerAlignment: Left
 ReferenceAlignment: Left
 
-# Short constructs may stay on one line when they fit naturally.
-AllowShortBlocksOnASingleLine: Always
-AllowShortFunctionsOnASingleLine: All
-AllowShortIfStatementsOnASingleLine: AllIfsAndElse
-AllowShortLoopsOnASingleLine: true
-AllowShortLambdasOnASingleLine: All
+# Do not aggressively collapse constructs.
+AllowShortBlocksOnASingleLine: Never
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: true
+AllowShortLoopsOnASingleLine: false
+AllowShortLambdasOnASingleLine: None
 AllowShortCaseLabelsOnASingleLine: false
 
-# Long argument/parameter lists: one item per line rather than bin-packing.
+# Once argument/parameter lists are broken, keep them vertical.
 BinPackArguments: false
 BinPackParameters: false
 AllowAllArgumentsOnNextLine: false
 AllowAllParametersOfDeclarationOnNextLine: false
 AlignAfterOpenBracket: false
 
-# Constructor initializer lists: deliberately vertical, aka tax-return mode.
+# Constructor initializer lists.
 BreakConstructorInitializers: BeforeColon
 PackConstructorInitializers: Never
 
@@ -84,10 +83,9 @@ PackConstructorInitializers: Never
 IndentCaseLabels: true
 IndentCaseBlocks: true
 
-# Namespace contents are not indented.
+# namespace foo {
 NamespaceIndentation: None
 
-# Avoid unrelated formatter churn.
 SortIncludes: Never
 ReflowComments: false
 '
@@ -117,20 +115,37 @@ ZED_SETTINGS_ALLMAN_PP='{
       "hard_tabs": false,
       "preferred_line_length": 100,
       "soft_wrap": "none",
+
       "auto_indent": true,
+      "auto_indent_on_paste": true,
+
       "use_on_type_format": false,
-      "format_on_save": "off",
-      "formatter": "language_server"
+      "format_on_save": "on",
+      "formatter": "language_server",
+
+      "show_edit_predictions": false,
+      "show_completions_on_input": true,
+      "auto_signature_help": true,
+      "show_signature_help_after_edits": true
     },
+
     "C++": {
       "tab_size": 4,
       "hard_tabs": false,
       "preferred_line_length": 100,
       "soft_wrap": "none",
+
       "auto_indent": true,
+      "auto_indent_on_paste": true,
+
       "use_on_type_format": false,
-      "format_on_save": "off",
-      "formatter": "language_server"
+      "format_on_save": "on",
+      "formatter": "language_server",
+
+      "show_edit_predictions": false,
+      "show_completions_on_input": true,
+      "auto_signature_help": true,
+      "show_signature_help_after_edits": true
     }
   }
 }'
@@ -378,7 +393,7 @@ parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       -b|--build) FLAG_BUILD_ONLY=true; FLAG_FULL_SETUP=false; shift ;;
-      -l|--lang) 
+      -l|--lang)
         if [[ -n "${2:-}" && ! "$2" =~ ^- ]]; then
           LANG_CHOICE="$2"; shift 2
         else
@@ -389,7 +404,7 @@ parse_args() {
       -f|--format) FLAG_FORMAT_ONLY=true; FLAG_FULL_SETUP=false; shift ;;
       -h|--help) usage ;;
       -*) die "Unknown option: $1. Use -h for help." ;;
-      *) 
+      *)
         if [[ -z "$PROJECT_NAME" ]]; then
           PROJECT_NAME="$1"
           shift
@@ -477,7 +492,7 @@ create_makefile() {
   info "Generating Makefile"
   local cc="gcc" cxx="g++"
   [[ "$LANG_CHOICE" == "cpp" ]] && cc="g++"
-  
+
   local content="$MAKEFILE_BASE"
   content="${content//{PROJECT_NAME\}/$PROJECT_NAME}"
   content="${content//{CC\}/$cc}"
@@ -592,7 +607,7 @@ pipeline_full() {
   $USE_CLANG_FORMAT && create_clang_format
   $USE_ZED_SETTINGS && create_zed_settings
   $USE_CLANG_TIDY && create_clang_tidy
-  
+
   create_main
   git_init
 }
