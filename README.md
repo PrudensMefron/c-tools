@@ -1,43 +1,121 @@
-# This is a simple script with tools for C/C++ development conveniency.
-The current `c-setup` file is a CLI script who can be used to easily setup `C` or `C++` projects, configure build systems, clang formatter and tidy, and basic folder structure.
+# c-tools
 
-It also provides a option for a `C/C++` project, in wich the main entry file will be a `main.cpp`.
+Small Bash tooling for bootstrapping C and C++ projects with the author's preferred Allman++ formatting setup.
 
-The script uses mine own personal formater prefferences, so the `C` formating would be GNUish and the C++ would be Allman. You can easily modify this on the script file.
+The `c-setup` CLI can create either:
 
-## Instalation
-You will need:
-- Git
-- Bash shell
+- a traditional C/C++ project; or
+- a desktop WebView project using [Saucer](https://github.com/saucer/saucer) with a Vite frontend.
 
-That works for Linux:
-1. First, clone the repo with git:
-```Bash
-git clone https://github.com/PrudensMefron/c-tools.git c-tools
+## Traditional projects
+
+Interactive setup supports:
+
+- Meson + Ninja
+- CMake + Ninja
+- Zig
+- Makefile
+- optional Git initialization
+- Allman++ `.clang-format`
+- `.clang-tidy`
+- local Zed settings
+
+When Zig is selected, the generated `build.zig` provides:
+
+```bash
+zig build
+zig build run
+zig build clean
+zig build release
+zig build release-run
+zig build release-clean
 ```
 
-2. Second, you grant execution permission to the script:
-```Bash
+The Zig template targets Zig 0.16.x and compiles C/C++ directly through the Zig toolchain.
+
+## Desktop WebView with Saucer
+
+The Saucer template uses C++23 and asks for one of these build setups:
+
+- CMake + Ninja
+- Zig + CMake + Ninja
+
+It also asks which frontend package manager/runtime should be used:
+
+- Bun
+- pnpm
+- npm
+- Yarn
+
+The setup creates `frontend/tools/dev.mjs`, but deliberately leaves the Vite framework choice to you. After setup, initialize the Vite project inside `frontend/` using the selected package manager. Because `frontend/tools/` already exists, create-vite may warn that the directory is not empty; keep/ignore the existing files instead of deleting `tools/`.
+
+For Zig + CMake + Ninja, the generated build exposes:
+
+```bash
+# Build frontend, embed it, compile a Debug native build
+zig build
+
+# Start Vite and run the Debug native application
+zig build dev
+
+# Embedded Debug build + run
+zig build run
+
+# Optimized embedded build
+zig build release
+
+# Optimized embedded build + run
+zig build release-run
+
+# Remove only release output
+zig build release-clean
+
+# Remove dev/debug/release output and frontend dist
+zig build clean
+
+# Also remove node_modules, .zig-cache and other reconstructible caches
+zig build clean-all
+```
+
+## Installation
+
+Requirements for the base script:
+
+- Git
+- Bash
+
+Clone the repository and make the script executable:
+
+```bash
+git clone https://github.com/PrudensMefron/c-tools.git c-tools
 cd c-tools
 chmod +x c-setup
 ```
-3. Third, create a symlink of the the script to the bin folder:
-```Bash
-# Move to a bin folder
+
+Create a symlink somewhere on your `PATH`, for example:
+
+```bash
 sudo ln -s "$(pwd)/c-setup" /usr/bin/c-setup
 ```
 
-And then you can just type `c-setup my-project-name` to setup your project inside the dir `my-project-name/`.
+Then create a project with:
+
+```bash
+c-setup my-project-name
+```
+
+Additional tools are required according to the selected project template, such as Zig, CMake, Ninja, Saucer's Linux development dependencies, and the selected JavaScript package manager/runtime.
 
 ## Uninstallation
-Just remove the symlink first:
-```Bash
+
+Remove the symlink:
+
+```bash
 sudo unlink /usr/bin/c-setup
 ```
 
-And then delete the repo dir you cloned during installation.
+Then delete the cloned repository if desired.
 
-## Suggestions or contributions?
-Feel free to open an Issue or Pull Request.
+## Contributions
 
-Hope you find it useful.
+Issues and pull requests are welcome.
