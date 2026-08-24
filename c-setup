@@ -9,18 +9,15 @@ IFS=$'\n\t'
 readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
 readonly YELLOW='\033[1;33m'
+readonly CYAN='\033[0;36m'
 readonly NC='\033[0m'
 
 # ----------------------------------------------------
-# CONFIGURATION TEMPLATES (Organized for easy modification)
+# CONFIGURATION TEMPLATES
 
-# --- CLANG-FORMAT: ALLMAN++ ---
-# A custom C/C++ style designed to stay readable while keeping the editor out
-# of the way during normal typing.
 CLANG_FORMAT_ALLMAN_PP='---
 BasedOnStyle: LLVM
 
-# Indentation
 IndentWidth: 4
 ContinuationIndentWidth: 4
 ConstructorInitializerIndentWidth: 4
@@ -28,11 +25,8 @@ TabWidth: 4
 UseTab: Never
 AccessModifierOffset: -4
 
-# Let the programmer decide where expressions are broken.
-# The editor still displays a preferred 100-column limit.
 ColumnLimit: 0
 
-# Allman braces, except namespaces.
 BreakBeforeBraces: Custom
 BraceWrapping:
   AfterCaseLabel: true
@@ -52,15 +46,12 @@ BraceWrapping:
   SplitEmptyRecord: false
   SplitEmptyNamespace: false
 
-# foo (), if (), while (), etc.
 SpaceBeforeParens: Always
 
-# Type* ptr, Type& ref
 DerivePointerAlignment: false
 PointerAlignment: Left
 ReferenceAlignment: Left
 
-# Do not aggressively collapse constructs.
 AllowShortBlocksOnASingleLine: Never
 AllowShortFunctionsOnASingleLine: None
 AllowShortIfStatementsOnASingleLine: true
@@ -68,29 +59,23 @@ AllowShortLoopsOnASingleLine: false
 AllowShortLambdasOnASingleLine: None
 AllowShortCaseLabelsOnASingleLine: false
 
-# Once argument/parameter lists are broken, keep them vertical.
 BinPackArguments: false
 BinPackParameters: false
 AllowAllArgumentsOnNextLine: false
 AllowAllParametersOfDeclarationOnNextLine: false
 AlignAfterOpenBracket: false
 
-# Constructor initializer lists.
 BreakConstructorInitializers: BeforeColon
 PackConstructorInitializers: Never
 
-# switch/case
 IndentCaseLabels: true
 IndentCaseBlocks: true
-
-# namespace foo {
 NamespaceIndentation: None
 
 SortIncludes: Never
 ReflowComments: false
 '
 
-# --- CLANG-TIDY ---
 CLANG_TIDY_BASE='Checks: >
   bugprone-*,
   clang-analyzer-*,
@@ -104,10 +89,6 @@ HeaderFilterRegex: ".*"
 FormatStyle: file
 '
 
-
-# --- ZED PROJECT SETTINGS ---
-# Keep normal indentation assistance, but disable LSP on-type formatting so
-# clangd does not rearrange braces/whitespace while code is still being typed.
 ZED_SETTINGS_ALLMAN_PP='{
   "languages": {
     "C": {
@@ -115,33 +96,26 @@ ZED_SETTINGS_ALLMAN_PP='{
       "hard_tabs": false,
       "preferred_line_length": 100,
       "soft_wrap": "none",
-
       "auto_indent": true,
       "auto_indent_on_paste": true,
-
       "use_on_type_format": false,
       "format_on_save": "on",
       "formatter": "language_server",
-
       "show_edit_predictions": false,
       "show_completions_on_input": true,
       "auto_signature_help": true,
       "show_signature_help_after_edits": true
     },
-
     "C++": {
       "tab_size": 4,
       "hard_tabs": false,
       "preferred_line_length": 100,
       "soft_wrap": "none",
-
       "auto_indent": true,
       "auto_indent_on_paste": true,
-
       "use_on_type_format": false,
       "format_on_save": "on",
       "formatter": "language_server",
-
       "show_edit_predictions": false,
       "show_completions_on_input": true,
       "auto_signature_help": true,
@@ -150,7 +124,6 @@ ZED_SETTINGS_ALLMAN_PP='{
   }
 }'
 
-# --- MESON TEMPLATES ---
 MESON_ROOT_BASE="project('{PROJECT_NAME}', {LANG_LIST},
   version: '1.0.0',
   default_options: [
@@ -168,7 +141,6 @@ MESON_SRC_BASE="executable(
   install: true,
 )"
 
-# --- CMAKE TEMPLATE ---
 CMAKE_BASE='cmake_minimum_required(VERSION 3.16)
 project({PROJECT_NAME} LANGUAGES {LANG_LIST} VERSION 1.0.0)
 
@@ -182,7 +154,6 @@ add_executable({PROJECT_NAME} ${SOURCES})
 target_include_directories({PROJECT_NAME} PRIVATE include)
 '
 
-# --- MAKEFILE TEMPLATE ---
 MAKEFILE_BASE='CC := {CC}
 CXX := {CXX}
 CFLAGS := -Wall -Wextra -Wpedantic {C_STD} -Iinclude
@@ -196,12 +167,12 @@ TARGET := {PROJECT_NAME}
 SOURCES := $(wildcard $(SRC)/*.c) $(wildcard $(SRC)/*.cpp)
 OBJECTS := $(patsubst $(SRC)/%.c,$(OBJ)/%.o,$(patsubst $(SRC)/%.cpp,$(OBJ)/%.o,$(SOURCES)))
 
-.PHONY: all clean run debug
+.PHONY: all clean run
 
 all: $(BIN)/$(TARGET)
 
 $(BIN)/$(TARGET): $(OBJECTS) | $(BIN)
-	$(CC) $(LDFLAGS) -o $@ $^
+	$(CXX) $(LDFLAGS) -o $@ $^
 
 $(OBJ)/%.o: $(SRC)/%.c | $(OBJ)
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -219,7 +190,6 @@ run: all
 	./$(BIN)/$(TARGET)
 '
 
-# --- MAIN FILES ---
 MAIN_C='#include <stdio.h>
 
 int main (int argc, char* argv[])
@@ -242,40 +212,343 @@ int main (int argc, char* argv[])
 }
 '
 
-# ----------------------------------------------------
-# PROJECT STATE VARIABLES
+SAUCER_MAIN_CPP='#include <saucer/smartview.hpp>
+
+#ifndef APP_DEV_FRONTEND
+#include <saucer/embedded/all.hpp>
+#endif
+
+coco::stray start (saucer::application* app)
+{
+    auto window = saucer::window::create (app).value ();
+    auto webview = saucer::smartview::create ({.window = window});
+
+    window->set_title ("{PROJECT_NAME}");
+    window->set_size ({.w = 1000, .h = 700});
+
+#ifdef APP_DEV_FRONTEND
+    webview->set_dev_tools (true);
+    webview->set_url ("http://127.0.0.1:5173");
+#else
+    webview->embed (saucer::embedded::all ());
+    webview->serve ("/index.html");
+#endif
+
+    window->show ();
+    co_await app->finish ();
+}
+
+int main ()
+{
+    return saucer::application::create ({.id = "{APP_ID}"})->run (start);
+}
+'
+
+SAUCER_CMAKE_NATIVE='cmake_minimum_required(VERSION 3.25)
+
+project(
+    {PROJECT_NAME}
+    VERSION 0.1.0
+    LANGUAGES CXX
+)
+
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+include(FetchContent)
+
+FetchContent_Declare(
+    saucer
+    GIT_REPOSITORY "https://github.com/saucer/saucer.git"
+    GIT_TAG v8.0.5
+    GIT_SHALLOW TRUE
+)
+
+FetchContent_MakeAvailable(saucer)
+
+add_executable(
+    {PROJECT_NAME}
+    src/main.cpp
+)
+
+option(
+    APP_DEV_FRONTEND
+    "Load frontend from the Vite development server"
+    ON
+)
+
+if(APP_DEV_FRONTEND)
+    target_compile_definitions(
+        {PROJECT_NAME}
+        PRIVATE APP_DEV_FRONTEND=1
+    )
+else()
+    saucer_embed(
+        "frontend/dist"
+        TARGET {PROJECT_NAME}
+    )
+
+    target_link_libraries(
+        {PROJECT_NAME}
+        PRIVATE saucer::embedded
+    )
+endif()
+
+target_compile_features(
+    {PROJECT_NAME}
+    PRIVATE cxx_std_23
+)
+
+target_link_libraries(
+    {PROJECT_NAME}
+    PRIVATE saucer::saucer
+)
+'
+
+SAUCER_CMAKE_ZIG='cmake_minimum_required(VERSION 3.31)
+
+project(
+    {PROJECT_NAME}
+    VERSION 0.1.0
+    LANGUAGES CXX
+)
+
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+set(
+    CMAKE_RUNTIME_OUTPUT_DIRECTORY
+    "${CMAKE_BINARY_DIR}/../bin"
+)
+
+include(FetchContent)
+
+set(saucer_backend "WebKitGtk" CACHE STRING "" FORCE)
+set(saucer_serializer "Glaze" CACHE STRING "" FORCE)
+set(saucer_static ON CACHE BOOL "" FORCE)
+set(saucer_examples OFF CACHE BOOL "" FORCE)
+set(saucer_tests OFF CACHE BOOL "" FORCE)
+set(saucer_unexpected_hack ON CACHE BOOL "" FORCE)
+
+FetchContent_Declare(
+    saucer
+    GIT_REPOSITORY "https://github.com/saucer/saucer.git"
+    GIT_TAG v8.0.5
+    GIT_SHALLOW TRUE
+)
+
+FetchContent_MakeAvailable(saucer)
+
+add_executable(
+    {PROJECT_NAME}
+    src/main.cpp
+)
+
+option(
+    APP_DEV_FRONTEND
+    "Load frontend from the Vite development server"
+    ON
+)
+
+if(APP_DEV_FRONTEND)
+    target_compile_definitions(
+        {PROJECT_NAME}
+        PRIVATE APP_DEV_FRONTEND=1
+    )
+else()
+    saucer_embed(
+        "frontend/dist"
+        TARGET {PROJECT_NAME}
+    )
+
+    target_link_libraries(
+        {PROJECT_NAME}
+        PRIVATE saucer::embedded
+    )
+endif()
+
+target_compile_features(
+    {PROJECT_NAME}
+    PRIVATE cxx_std_23
+)
+
+target_link_libraries(
+    {PROJECT_NAME}
+    PRIVATE saucer::saucer
+)
+'
+
+SAUCER_CLANGD_NATIVE='CompileFlags:
+  CompilationDatabase: build
+'
+
+SAUCER_CLANGD_ZIG='CompileFlags:
+  CompilationDatabase: .
+
+  Compiler: /usr/bin/clang++-21
+
+  Remove:
+    - -Winvalid-pch
+    - -include-pch
+
+  Add:
+    - -stdlib=libc++
+'
+
+DEV_MJS_NODE='#!/usr/bin/env node
+import { spawn } from "node:child_process"
+import { dirname, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
+import { createServer } from "vite"
+
+if (!process.argv[2]) {
+  console.error("Usage: node frontend/tools/dev.mjs <native-executable>")
+  process.exit(2)
+}
+
+const toolsDir = dirname(fileURLToPath(import.meta.url))
+const frontendDir = resolve(toolsDir, "..")
+const projectDir = resolve(frontendDir, "..")
+const executable = resolve(projectDir, process.argv[2])
+
+const server = await createServer({
+  root: frontendDir,
+  server: {
+    host: "127.0.0.1",
+    port: 5173,
+    strictPort: true,
+  },
+})
+
+await server.listen()
+server.printUrls()
+
+const app = spawn(executable, [], {
+  cwd: projectDir,
+  stdio: "inherit",
+})
+
+let shuttingDown = false
+
+async function shutdown(code = 0) {
+  if (shuttingDown) return
+  shuttingDown = true
+  await server.close()
+  process.exit(code)
+}
+
+app.on("exit", (code) => {
+  void shutdown(code ?? 0)
+})
+
+process.on("SIGINT", () => {
+  app.kill("SIGINT")
+})
+
+process.on("SIGTERM", () => {
+  app.kill("SIGTERM")
+})
+'
+
+DEV_MJS_BUN='#!/usr/bin/env bun
+import { spawn } from "node:child_process"
+import { resolve } from "node:path"
+import { createServer } from "vite"
+
+if (!process.argv[2]) {
+  console.error("Usage: bun frontend/tools/dev.mjs <native-executable>")
+  process.exit(2)
+}
+
+const frontendDir = resolve(import.meta.dir, "..")
+const projectDir = resolve(frontendDir, "..")
+const executable = resolve(projectDir, process.argv[2])
+
+const server = await createServer({
+  root: frontendDir,
+  server: {
+    host: "127.0.0.1",
+    port: 5173,
+    strictPort: true,
+  },
+})
+
+await server.listen()
+server.printUrls()
+
+const app = spawn(executable, [], {
+  cwd: projectDir,
+  stdio: "inherit",
+})
+
+let shuttingDown = false
+
+async function shutdown(code = 0) {
+  if (shuttingDown) return
+  shuttingDown = true
+  await server.close()
+  process.exit(code)
+}
+
+app.on("exit", (code) => {
+  void shutdown(code ?? 0)
+})
+
+process.on("SIGINT", () => {
+  app.kill("SIGINT")
+})
+
+process.on("SIGTERM", () => {
+  app.kill("SIGTERM")
+})
+'
+
 PROJECT_NAME=""
 PROJECT_DIR=""
-LANG_CHOICE="" # "c", "cpp", "both"
+PROJECT_KIND=""
+LANG_CHOICE=""
+
 USE_MESON=false
 USE_CMAKE=false
 USE_MAKE=false
+USE_ZIG=false
 USE_GIT=false
 USE_CLANG_FORMAT=false
 USE_CLANG_TIDY=false
 USE_ZED_SETTINGS=false
+
+SAUCER_BUILD_SYSTEM=""
+FRONTEND_RUNTIME=""
+
 C_STANDARD="c11"
 CPP_STANDARD="c++17"
 AUTHOR_NAME=""
 AUTHOR_EMAIL=""
 
-# PIPELINE FLAGS
 FLAG_BUILD_ONLY=false
 FLAG_LANG_ONLY=false
 FLAG_GIT_ONLY=false
 FLAG_FORMAT_ONLY=false
 FLAG_FULL_SETUP=true
-# ----------------------------------------------------
 
 # ----------------------------------------------------
-# AUX FUNCTIONS
+# AUXILIARY FUNCTIONS
+
 die() { echo -e "${RED}Error: $*${NC}" >&2; exit 1; }
 info() { echo -e "${GREEN}Success: $*${NC}"; }
 warn() { echo -e "${YELLOW}Warn: $*${NC}"; }
+note() { echo -e "${CYAN}$*${NC}"; }
 
+validate_project_name() {
+  [[ "$PROJECT_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || \
+    die "Project name must use only letters, numbers, '.', '_' or '-', and must start with a letter or number."
+}
 
-# ----------------------------------------------------
-# GET AUTHOR INFO FROM GIT
 get_author_info() {
   local git_name git_email
 
@@ -289,32 +562,101 @@ get_author_info() {
   AUTHOR_EMAIL="${git_email:-}"
 }
 
+runtime_build_command() {
+  case "$FRONTEND_RUNTIME" in
+    bun) echo "bun run build" ;;
+    pnpm) echo "pnpm run build" ;;
+    npm) echo "npm run build" ;;
+    yarn) echo "yarn run build" ;;
+    *) die "Unknown frontend runtime: $FRONTEND_RUNTIME" ;;
+  esac
+}
+
+runtime_install_command() {
+  case "$FRONTEND_RUNTIME" in
+    bun) echo "bun install" ;;
+    pnpm) echo "pnpm install" ;;
+    npm) echo "npm install" ;;
+    yarn) echo "yarn install" ;;
+    *) die "Unknown frontend runtime: $FRONTEND_RUNTIME" ;;
+  esac
+}
+
+runtime_vite_command() {
+  case "$FRONTEND_RUNTIME" in
+    bun) echo "bun create vite ." ;;
+    pnpm) echo "pnpm create vite ." ;;
+    npm) echo "npm create vite@latest ." ;;
+    yarn) echo "yarn create vite ." ;;
+    *) die "Unknown frontend runtime: $FRONTEND_RUNTIME" ;;
+  esac
+}
+
 # ----------------------------------------------------
-# MODULAR QUESTIONS
+# INTERACTIVE QUESTIONS
+
+ask_project_kind() {
+  [[ -n "$PROJECT_KIND" ]] && return
+
+  echo -e "\nChoose project type:"
+  select opt in "Traditional C/C++" "Desktop WebView with Saucer"; do
+    case $REPLY in
+      1) PROJECT_KIND="traditional"; break ;;
+      2) PROJECT_KIND="saucer"; LANG_CHOICE="cpp"; CPP_STANDARD="c++23"; break ;;
+      *) warn "Invalid option." ;;
+    esac
+  done
+}
 
 ask_language() {
   [[ -n "$LANG_CHOICE" ]] && return
+
   echo -e "\nChoose language:"
   select opt in "C" "C++" "Both (C & C++)"; do
     case $REPLY in
-      1) LANG_CHOICE="c"; break;;
-      2) LANG_CHOICE="cpp"; break;;
-      3) LANG_CHOICE="both"; break;;
-      *) warn "Invalid option.";;
+      1) LANG_CHOICE="c"; break ;;
+      2) LANG_CHOICE="cpp"; break ;;
+      3) LANG_CHOICE="both"; break ;;
+      *) warn "Invalid option." ;;
     esac
   done
 }
 
 ask_build_system() {
   echo -e "\nChoose a build system:"
-  select build in "Meson + Ninja (default)" "CMake + Ninja" "Makefile" "All" "None"; do
+  select build in "Meson + Ninja (default)" "CMake + Ninja" "Zig" "Makefile" "All" "None"; do
     case $REPLY in
-      1) USE_MESON=true; break;;
-      2) USE_CMAKE=true; break;;
-      3) USE_MAKE=true; break;;
-      4) USE_MESON=true; USE_CMAKE=true; USE_MAKE=true; break;;
-      5) break;;
-      *) warn "Invalid option.";;
+      1) USE_MESON=true; break ;;
+      2) USE_CMAKE=true; break ;;
+      3) USE_ZIG=true; break ;;
+      4) USE_MAKE=true; break ;;
+      5) USE_MESON=true; USE_CMAKE=true; USE_ZIG=true; USE_MAKE=true; break ;;
+      6) break ;;
+      *) warn "Invalid option." ;;
+    esac
+  done
+}
+
+ask_saucer_build_system() {
+  echo -e "\nChoose the Saucer build system:"
+  select build in "CMake + Ninja" "Zig + CMake + Ninja"; do
+    case $REPLY in
+      1) SAUCER_BUILD_SYSTEM="cmake"; break ;;
+      2) SAUCER_BUILD_SYSTEM="zig-cmake"; break ;;
+      *) warn "Invalid option." ;;
+    esac
+  done
+}
+
+ask_frontend_runtime() {
+  echo -e "\nChoose the frontend package manager/runtime:"
+  select runtime in "Bun" "Pnpm" "Npm" "Yarn"; do
+    case $REPLY in
+      1) FRONTEND_RUNTIME="bun"; break ;;
+      2) FRONTEND_RUNTIME="pnpm"; break ;;
+      3) FRONTEND_RUNTIME="npm"; break ;;
+      4) FRONTEND_RUNTIME="yarn"; break ;;
+      *) warn "Invalid option." ;;
     esac
   done
 }
@@ -324,7 +666,6 @@ ask_git() {
   if [[ "$ans" =~ ^([yY]|$) ]]; then
     USE_GIT=true
   fi
-  return 0
 }
 
 ask_format() {
@@ -338,26 +679,33 @@ ask_format() {
   if [[ "$ans" =~ ^([yY]|$) ]]; then
     USE_CLANG_TIDY=true
   fi
-  return 0
 }
 
 ask_standards() {
   if [[ "$LANG_CHOICE" == "c" || "$LANG_CHOICE" == "both" ]]; then
     echo -e "\nSelect C standard:"
     select std in "c89" "c99" "c11" "c17" "c23"; do
-      C_STANDARD="c${std#c}"; [[ -n "$C_STANDARD" ]] && break
+      case $REPLY in
+        1|2|3|4|5) C_STANDARD="$std"; break ;;
+        *) warn "Invalid option." ;;
+      esac
     done
   fi
+
   if [[ "$LANG_CHOICE" == "cpp" || "$LANG_CHOICE" == "both" ]]; then
     echo -e "\nSelect C++ standard:"
     select std in "c++11" "c++14" "c++17" "c++20" "c++23"; do
-      CPP_STANDARD="${std}"; [[ -n "$CPP_STANDARD" ]] && break
+      case $REPLY in
+        1|2|3|4|5) CPP_STANDARD="$std"; break ;;
+        *) warn "Invalid option." ;;
+      esac
     done
   fi
 }
 
 ask_author() {
   get_author_info
+
   if [[ -n "$AUTHOR_NAME" ]]; then
     info "Author detected: $AUTHOR_NAME <$AUTHOR_EMAIL>"
     read -rp $'Use this author info? [Y/N] ' ans
@@ -373,31 +721,37 @@ ask_author() {
 }
 
 # ----------------------------------------------------
-# USAGE
+# CLI
+
 usage() {
-  echo "Usage: allman++ [options] [project_name]"
-  echo "Options:"
-  echo "  -b, --build   Setup only the build system (Meson, CMake, or Makefile)"
-  echo "  -l, --lang    Setup only the language (C, C++, or both) and main file"
-  echo "  -g, --git     Initialize a Git repository only"
-  echo "  -f, --format  Setup Allman++ Clang-format, Zed settings, and Clang-tidy only"
-  echo "  -h, --help    Show this help message"
-  echo ""
-  echo "If no options are provided, a full interactive setup will run."
+  cat <<'EOF'
+Usage: c-setup [options] [project_name]
+
+Options:
+  -b, --build   Setup only a traditional build system
+  -l, --lang    Setup only the language and main source file
+  -g, --git     Initialize a Git repository only
+  -f, --format  Setup Allman++ clang-format, Zed settings and clang-tidy only
+  -h, --help    Show this help message
+
+Without options, c-setup runs the full interactive setup. The full setup can
+create either a traditional C/C++ project or a Saucer desktop WebView project.
+EOF
   exit 0
 }
 
-# ----------------------------------------------------
-# ARGUMENT PARSING
 parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       -b|--build) FLAG_BUILD_ONLY=true; FLAG_FULL_SETUP=false; shift ;;
       -l|--lang)
+        FLAG_LANG_ONLY=true
+        FLAG_FULL_SETUP=false
         if [[ -n "${2:-}" && ! "$2" =~ ^- ]]; then
-          LANG_CHOICE="$2"; shift 2
+          LANG_CHOICE="$2"
+          shift 2
         else
-          FLAG_LANG_ONLY=true; FLAG_FULL_SETUP=false; shift
+          shift
         fi
         ;;
       -g|--git) FLAG_GIT_ONLY=true; FLAG_FULL_SETUP=false; shift ;;
@@ -415,7 +769,6 @@ parse_args() {
     esac
   done
 
-  # Project name/directory logic
   if [[ -z "$PROJECT_NAME" ]]; then
     if $FLAG_FULL_SETUP; then
       read -rp "Project name: " PROJECT_NAME
@@ -425,44 +778,39 @@ parse_args() {
     fi
   fi
 
+  validate_project_name
+
   if [[ "$PROJECT_NAME" == "$(basename "$(pwd)")" ]]; then
     PROJECT_DIR="$(pwd)"
   else
     PROJECT_DIR="$(pwd)/$PROJECT_NAME"
     if [[ -d "$PROJECT_DIR" && -n "$(ls -A "$PROJECT_DIR" 2>/dev/null)" ]]; then
-        die "Directory '$PROJECT_NAME' already exists and is not empty."
+      die "Directory '$PROJECT_NAME' already exists and is not empty."
     fi
   fi
 }
-# ----------------------------------------------------
-
 
 # ----------------------------------------------------
-# FILE CREATION HELPERS
-create_structure() {
-  info "Creating directory structure in $PROJECT_DIR"
+# COMMON FILE CREATION
+
+create_traditional_structure() {
+  info "Creating traditional project structure in $PROJECT_DIR"
   mkdir -p "$PROJECT_DIR"/{src,include,tests,build,docs,external}
 
   cat > "$PROJECT_DIR/README.md" <<EOF
 # $PROJECT_NAME
 Created by $AUTHOR_NAME <$AUTHOR_EMAIL>
 
-## Build Instructions
+## Build
 EOF
 
-  if $USE_MESON; then
-    cat >> "$PROJECT_DIR/README.md" <<EOF
-\`\`\`bash
-meson setup builddir
-meson compile -C builddir
-./builddir/$PROJECT_NAME
-\`\`\`
-EOF
-  fi
-
-  cat >> "$PROJECT_DIR/.gitignore" <<EOF
+  cat > "$PROJECT_DIR/.gitignore" <<'EOF'
 build/
 builddir/
+zig-out/
+.zig-cache/
+obj/
+bin/
 *.o
 *.a
 *.so
@@ -478,12 +826,45 @@ meson-private/
 meson-logs/
 EOF
 
-  if $USE_CLANG_FORMAT; then
+  if $USE_MESON; then
     cat >> "$PROJECT_DIR/README.md" <<EOF
 
-## Code Style
-This project uses the **Allman++** C/C++ style defined in \`.clang-format\`.
-Local Zed settings disable on-type formatting and format-on-save so formatting happens explicitly.
+### Meson + Ninja
+
+\`\`\`bash
+meson setup builddir
+meson compile -C builddir
+./builddir/$PROJECT_NAME
+\`\`\`
+EOF
+  fi
+
+  if $USE_CMAKE; then
+    cat >> "$PROJECT_DIR/README.md" <<EOF
+
+### CMake + Ninja
+
+\`\`\`bash
+cmake -S . -B build -G Ninja
+cmake --build build
+./build/$PROJECT_NAME
+\`\`\`
+EOF
+  fi
+
+  if $USE_ZIG; then
+    cat >> "$PROJECT_DIR/README.md" <<'EOF'
+
+### Zig
+
+```bash
+zig build
+zig build run
+zig build release
+zig build release-run
+zig build release-clean
+zig build clean
+```
 EOF
   fi
 }
@@ -491,33 +872,38 @@ EOF
 create_makefile() {
   info "Generating Makefile"
   local cc="gcc" cxx="g++"
-  [[ "$LANG_CHOICE" == "cpp" ]] && cc="g++"
-
   local content="$MAKEFILE_BASE"
-  content="${content//{PROJECT_NAME\}/$PROJECT_NAME}"
-  content="${content//{CC\}/$cc}"
-  content="${content//{CXX\}/$cxx}"
-  content="${content//{C_STD\}/-std=$C_STANDARD}"
-  content="${content//{CPP_STD\}/-std=$CPP_STANDARD}"
-  echo "$content" > "$PROJECT_DIR/Makefile"
+
+  content="${content//\{PROJECT_NAME\}/$PROJECT_NAME}"
+  content="${content//\{CC\}/$cc}"
+  content="${content//\{CXX\}/$cxx}"
+  content="${content//\{C_STD\}/-std=$C_STANDARD}"
+  content="${content//\{CPP_STD\}/-std=$CPP_STANDARD}"
+
+  printf '%s\n' "$content" > "$PROJECT_DIR/Makefile"
   mkdir -p "$PROJECT_DIR"/{obj,bin}
 }
 
 create_cmake() {
   info "Generating CMakeLists.txt"
   local lang_list="C"
+  local std_config
+  local content="$CMAKE_BASE"
+
   [[ "$LANG_CHOICE" == "cpp" ]] && lang_list="CXX"
   [[ "$LANG_CHOICE" == "both" ]] && lang_list="C CXX"
 
-  local std_config="set(CMAKE_C_STANDARD ${C_STANDARD#c})\nset(CMAKE_C_STANDARD_REQUIRED ON)"
-  [[ "$LANG_CHOICE" == "cpp" ]] && std_config="set(CMAKE_CXX_STANDARD ${CPP_STANDARD#c++})\nset(CMAKE_CXX_STANDARD_REQUIRED ON)"
-  [[ "$LANG_CHOICE" == "both" ]] && std_config="set(CMAKE_C_STANDARD ${C_STANDARD#c})\nset(CMAKE_CXX_STANDARD ${CPP_STANDARD#c++})\nset(CMAKE_C_STANDARD_REQUIRED ON)\nset(CMAKE_CXX_STANDARD_REQUIRED ON)"
+  std_config="set(CMAKE_C_STANDARD ${C_STANDARD#c})\nset(CMAKE_C_STANDARD_REQUIRED ON)"
+  [[ "$LANG_CHOICE" == "cpp" ]] && \
+    std_config="set(CMAKE_CXX_STANDARD ${CPP_STANDARD#c++})\nset(CMAKE_CXX_STANDARD_REQUIRED ON)"
+  [[ "$LANG_CHOICE" == "both" ]] && \
+    std_config="set(CMAKE_C_STANDARD ${C_STANDARD#c})\nset(CMAKE_CXX_STANDARD ${CPP_STANDARD#c++})\nset(CMAKE_C_STANDARD_REQUIRED ON)\nset(CMAKE_CXX_STANDARD_REQUIRED ON)"
 
-  local content="$CMAKE_BASE"
-  content="${content//{PROJECT_NAME\}/$PROJECT_NAME}"
-  content="${content//{LANG_LIST\}/$lang_list}"
-  content="${content//{STD_CONFIG\}/$std_config}"
-  echo -e "$content" > "$PROJECT_DIR/CMakeLists.txt"
+  content="${content//\{PROJECT_NAME\}/$PROJECT_NAME}"
+  content="${content//\{LANG_LIST\}/$lang_list}"
+  content="${content//\{STD_CONFIG\}/$std_config}"
+
+  printf '%b\n' "$content" > "$PROJECT_DIR/CMakeLists.txt"
 }
 
 create_meson() {
@@ -525,6 +911,7 @@ create_meson() {
   local lang_list="'c'"
   local std_opts="'c_std=$C_STANDARD'"
   local sources="'main.c'"
+  local root_content src_content
 
   if [[ "$LANG_CHOICE" == "cpp" ]]; then
     lang_list="'cpp'"
@@ -533,56 +920,531 @@ create_meson() {
   elif [[ "$LANG_CHOICE" == "both" ]]; then
     lang_list="'c', 'cpp'"
     std_opts="'c_std=$C_STANDARD', 'cpp_std=$CPP_STANDARD'"
-    sources="'main.cpp'" # Default entry for both is .cpp
+    sources="'main.cpp'"
   fi
 
-  # Root meson.build
-  local root_content="$MESON_ROOT_BASE"
-  root_content="${root_content//{PROJECT_NAME\}/$PROJECT_NAME}"
-  root_content="${root_content//{LANG_LIST\}/$lang_list}"
-  root_content="${root_content//{STD_OPTIONS\}/$std_opts}"
-  echo "$root_content" > "$PROJECT_DIR/meson.build"
+  root_content="$MESON_ROOT_BASE"
+  root_content="${root_content//\{PROJECT_NAME\}/$PROJECT_NAME}"
+  root_content="${root_content//\{LANG_LIST\}/$lang_list}"
+  root_content="${root_content//\{STD_OPTIONS\}/$std_opts}"
+  printf '%s\n' "$root_content" > "$PROJECT_DIR/meson.build"
 
-  # src/meson.build
-  local src_content="$MESON_SRC_BASE"
-  src_content="${src_content//{PROJECT_NAME\}/$PROJECT_NAME}"
-  src_content="${src_content//{SOURCES\}/$sources}"
-  echo "$src_content" > "$PROJECT_DIR/src/meson.build"
+  src_content="$MESON_SRC_BASE"
+  src_content="${src_content//\{PROJECT_NAME\}/$PROJECT_NAME}"
+  src_content="${src_content//\{SOURCES\}/$sources}"
+  printf '%s\n' "$src_content" > "$PROJECT_DIR/src/meson.build"
 }
 
 create_clang_format() {
   info "Generating .clang-format with Allman++ style"
-  echo "$CLANG_FORMAT_ALLMAN_PP" > "$PROJECT_DIR/.clang-format"
+  printf '%s\n' "$CLANG_FORMAT_ALLMAN_PP" > "$PROJECT_DIR/.clang-format"
 }
 
 create_zed_settings() {
   info "Generating Zed project settings for Allman++"
   mkdir -p "$PROJECT_DIR/.zed"
-  echo "$ZED_SETTINGS_ALLMAN_PP" > "$PROJECT_DIR/.zed/settings.json"
+  printf '%s\n' "$ZED_SETTINGS_ALLMAN_PP" > "$PROJECT_DIR/.zed/settings.json"
 }
 
 create_clang_tidy() {
   info "Generating .clang-tidy"
-  echo "$CLANG_TIDY_BASE" > "$PROJECT_DIR/.clang-tidy"
+  printf '%s\n' "$CLANG_TIDY_BASE" > "$PROJECT_DIR/.clang-tidy"
 }
 
 create_main() {
   info "Generating source files"
+
   if [[ "$LANG_CHOICE" == "c" ]]; then
-    local content="${MAIN_C//{PROJECT_NAME\}/$PROJECT_NAME}"
-    echo "$content" > "$PROJECT_DIR/src/main.c"
-  elif [[ "$LANG_CHOICE" == "cpp" ]]; then
-    local content="${MAIN_CPP//{PROJECT_NAME\}/$PROJECT_NAME}"
-    echo "$content" > "$PROJECT_DIR/src/main.cpp"
-  elif [[ "$LANG_CHOICE" == "both" ]]; then
-    local content_cpp="${MAIN_CPP//{PROJECT_NAME\}/$PROJECT_NAME}"
-    echo "$content_cpp" > "$PROJECT_DIR/src/main.cpp"
+    local content="${MAIN_C//\{PROJECT_NAME\}/$PROJECT_NAME}"
+    printf '%s\n' "$content" > "$PROJECT_DIR/src/main.c"
+  else
+    local content="${MAIN_CPP//\{PROJECT_NAME\}/$PROJECT_NAME}"
+    printf '%s\n' "$content" > "$PROJECT_DIR/src/main.cpp"
   fi
 }
-# ----------------------------------------------------
+
+create_traditional_zig() {
+  info "Generating Zig 0.16 build system"
+
+  local source_file cpp_enabled flags
+
+  if [[ "$LANG_CHOICE" == "c" ]]; then
+    source_file="src/main.c"
+    cpp_enabled="false"
+    flags="\"-Wall\", \"-Wextra\", \"-Wpedantic\", \"-std=$C_STANDARD\""
+  else
+    source_file="src/main.cpp"
+    cpp_enabled="true"
+    flags="\"-Wall\", \"-Wextra\", \"-Wpedantic\", \"-std=$CPP_STANDARD\""
+  fi
+
+  cat > "$PROJECT_DIR/build.zig" <<EOF
+const std = @import("std");
+
+const project_name = "$PROJECT_NAME";
+
+pub fn build(b: *std.Build) void {
+    const target = b.standardTargetOptions(.{});
+
+    const debug_exe = createExecutable(b, target, .Debug);
+    const debug_install = b.addInstallArtifact(debug_exe, .{
+        .dest_dir = .{ .override = .{ .custom = "debug/bin" } },
+    });
+
+    b.getInstallStep().dependOn(&debug_install.step);
+
+    const build_step = b.step("build", "Build the debug application");
+    build_step.dependOn(&debug_install.step);
+
+    const run = b.addRunArtifact(debug_exe);
+    if (b.args) |args| run.addArgs(args);
+
+    const run_step = b.step("run", "Build and run the debug application");
+    run_step.dependOn(&run.step);
+
+    const release_exe = createExecutable(b, target, .ReleaseFast);
+    const release_install = b.addInstallArtifact(release_exe, .{
+        .dest_dir = .{ .override = .{ .custom = "release/bin" } },
+    });
+
+    const release_step = b.step("release", "Build the optimized release application");
+    release_step.dependOn(&release_install.step);
+
+    const release_run = b.addRunArtifact(release_exe);
+    if (b.args) |args| release_run.addArgs(args);
+
+    const release_run_step = b.step("release-run", "Build and run the release application");
+    release_run_step.dependOn(&release_run.step);
+
+    const release_clean = b.addSystemCommand(&.{ "rm", "-rf", "zig-out/release" });
+    const release_clean_step = b.step("release-clean", "Remove installed release artifacts");
+    release_clean_step.dependOn(&release_clean.step);
+
+    const clean = b.addSystemCommand(&.{ "rm", "-rf", "zig-out" });
+    const clean_step = b.step("clean", "Remove installed build artifacts");
+    clean_step.dependOn(&clean.step);
+}
+
+fn createExecutable(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+) *std.Build.Step.Compile {
+    const module = b.createModule(.{
+        .root_source_file = null,
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+        .link_libcpp = $cpp_enabled,
+    });
+
+    module.addIncludePath(b.path("include"));
+    module.addCSourceFiles(.{
+        .root = b.path("."),
+        .files = &.{ "$source_file" },
+        .flags = &.{ $flags },
+    });
+
+    return b.addExecutable(.{
+        .name = project_name,
+        .root_module = module,
+    });
+}
+EOF
+}
 
 # ----------------------------------------------------
-# GIT INIT
+# SAUCER PROJECT CREATION
+
+create_saucer_structure() {
+  info "Creating Saucer desktop WebView structure in $PROJECT_DIR"
+  mkdir -p "$PROJECT_DIR"/{src,include,frontend/tools,docs,external}
+
+  cat > "$PROJECT_DIR/.gitignore" <<'EOF'
+zig-out/
+.zig-cache/
+build/
+compile_commands.json
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/.cache/
+.vscode/
+.idea/
+.zed/
+*.o
+*.a
+*.so
+*.exe
+EOF
+}
+
+create_saucer_main() {
+  local content="$SAUCER_MAIN_CPP"
+  local app_id="${PROJECT_NAME//_/-}"
+
+  content="${content//\{PROJECT_NAME\}/$PROJECT_NAME}"
+  content="${content//\{APP_ID\}/$app_id}"
+
+  printf '%s\n' "$content" > "$PROJECT_DIR/src/main.cpp"
+}
+
+create_saucer_cmake_native() {
+  info "Generating Saucer CMake + Ninja configuration"
+  local content="${SAUCER_CMAKE_NATIVE//\{PROJECT_NAME\}/$PROJECT_NAME}"
+  printf '%s\n' "$content" > "$PROJECT_DIR/CMakeLists.txt"
+  printf '%s\n' "$SAUCER_CLANGD_NATIVE" > "$PROJECT_DIR/.clangd"
+}
+
+create_saucer_cmake_zig() {
+  info "Generating Saucer Zig + CMake + Ninja configuration"
+  local content="${SAUCER_CMAKE_ZIG//\{PROJECT_NAME\}/$PROJECT_NAME}"
+  printf '%s\n' "$content" > "$PROJECT_DIR/CMakeLists.txt"
+  printf '%s\n' "$SAUCER_CLANGD_ZIG" > "$PROJECT_DIR/.clangd"
+  create_saucer_zig_build
+}
+
+create_saucer_dev_script() {
+  info "Generating frontend/tools/dev.mjs for $FRONTEND_RUNTIME"
+
+  if [[ "$FRONTEND_RUNTIME" == "bun" ]]; then
+    printf '%s\n' "$DEV_MJS_BUN" > "$PROJECT_DIR/frontend/tools/dev.mjs"
+  else
+    printf '%s\n' "$DEV_MJS_NODE" > "$PROJECT_DIR/frontend/tools/dev.mjs"
+  fi
+
+  chmod +x "$PROJECT_DIR/frontend/tools/dev.mjs"
+}
+
+create_saucer_zig_build() {
+  local frontend_build runtime_exec
+
+  case "$FRONTEND_RUNTIME" in
+    bun)
+      frontend_build='"bun", "run", "build"'
+      runtime_exec='"bun", "frontend/tools/dev.mjs"'
+      ;;
+    pnpm)
+      frontend_build='"pnpm", "run", "build"'
+      runtime_exec='"node", "frontend/tools/dev.mjs"'
+      ;;
+    npm)
+      frontend_build='"npm", "run", "build"'
+      runtime_exec='"node", "frontend/tools/dev.mjs"'
+      ;;
+    yarn)
+      frontend_build='"yarn", "run", "build"'
+      runtime_exec='"node", "frontend/tools/dev.mjs"'
+      ;;
+    *) die "Unknown frontend runtime: $FRONTEND_RUNTIME" ;;
+  esac
+
+  cat > "$PROJECT_DIR/build.zig" <<EOF
+const std = @import("std");
+
+const project_name = "$PROJECT_NAME";
+
+pub fn build(b: *std.Build) void {
+    const frontend_build = b.addSystemCommand(&.{
+        "cmake",
+        "-E",
+        "chdir",
+        "frontend",
+        $frontend_build,
+    });
+
+    const debug_configure = addConfigure(
+        b,
+        "zig-out/debug/cmake",
+        "Debug",
+        false,
+    );
+    debug_configure.step.dependOn(&frontend_build.step);
+
+    const debug_db = addCompileDatabaseSync(b, debug_configure, "zig-out/debug/cmake");
+    const debug_compile = addCompile(b, debug_db, "zig-out/debug/cmake");
+
+    b.getInstallStep().dependOn(&debug_compile.step);
+
+    const build_step = b.step("build", "Build frontend and debug embedded application");
+    build_step.dependOn(&debug_compile.step);
+
+    const dev_configure = addConfigure(
+        b,
+        "zig-out/dev/cmake",
+        "Debug",
+        true,
+    );
+
+    const dev_db = addCompileDatabaseSync(b, dev_configure, "zig-out/dev/cmake");
+    const dev_compile = addCompile(b, dev_db, "zig-out/dev/cmake");
+
+    const dev_run = b.addSystemCommand(&.{
+        $runtime_exec,
+        "zig-out/dev/bin/$PROJECT_NAME",
+    });
+    dev_run.step.dependOn(&dev_compile.step);
+
+    const dev_step = b.step("dev", "Run Vite dev server and debug native application");
+    dev_step.dependOn(&dev_run.step);
+
+    const run = b.addSystemCommand(&.{ "zig-out/debug/bin/$PROJECT_NAME" });
+    run.step.dependOn(&debug_compile.step);
+
+    if (b.args) |args| run.addArgs(args);
+
+    const run_step = b.step("run", "Build and run the debug embedded application");
+    run_step.dependOn(&run.step);
+
+    const release_frontend_build = b.addSystemCommand(&.{
+        "cmake",
+        "-E",
+        "chdir",
+        "frontend",
+        $frontend_build,
+    });
+
+    const release_configure = addConfigure(
+        b,
+        "zig-out/release/cmake",
+        "Release",
+        false,
+    );
+    release_configure.step.dependOn(&release_frontend_build.step);
+
+    const release_compile = addCompile(b, release_configure, "zig-out/release/cmake");
+
+    const release_step = b.step("release", "Build optimized embedded release application");
+    release_step.dependOn(&release_compile.step);
+
+    const release_run = b.addSystemCommand(&.{ "zig-out/release/bin/$PROJECT_NAME" });
+    release_run.step.dependOn(&release_compile.step);
+
+    if (b.args) |args| release_run.addArgs(args);
+
+    const release_run_step = b.step("release-run", "Build and run optimized release application");
+    release_run_step.dependOn(&release_run.step);
+
+    const release_clean = b.addSystemCommand(&.{
+        "rm",
+        "-rf",
+        "zig-out/release",
+    });
+
+    const release_clean_step = b.step("release-clean", "Remove only release build artifacts");
+    release_clean_step.dependOn(&release_clean.step);
+
+    const clean = b.addSystemCommand(&.{
+        "rm",
+        "-rf",
+        "zig-out",
+        "frontend/dist",
+        "compile_commands.json",
+    });
+
+    const clean_step = b.step("clean", "Remove dev, debug, release and frontend dist artifacts");
+    clean_step.dependOn(&clean.step);
+
+    const clean_all = b.addSystemCommand(&.{
+        "rm",
+        "-rf",
+        "zig-out",
+        ".zig-cache",
+        "compile_commands.json",
+        "frontend/dist",
+        "frontend/node_modules",
+        "frontend/.vite",
+        "frontend/.cache",
+    });
+
+    const clean_all_step = b.step("clean-all", "Remove every reconstructible local build artifact");
+    clean_all_step.dependOn(&clean_all.step);
+}
+
+fn addConfigure(
+    b: *std.Build,
+    build_dir: []const u8,
+    build_type: []const u8,
+    dev_frontend: bool,
+) *std.Build.Step.Run {
+    const configure = b.addSystemCommand(&.{
+        "cmake",
+        "-E",
+        "env",
+        "CXX=zig c++",
+        "cmake",
+        "-S",
+        ".",
+        "-B",
+        build_dir,
+        "-G",
+        "Ninja",
+    });
+
+    configure.addArg(b.fmt("-DCMAKE_BUILD_TYPE={s}", .{build_type}));
+    configure.addArg(if (dev_frontend) "-DAPP_DEV_FRONTEND=ON" else "-DAPP_DEV_FRONTEND=OFF");
+    configure.addArg("-DCMAKE_EXPORT_COMPILE_COMMANDS=ON");
+
+    return configure;
+}
+
+fn addCompile(
+    b: *std.Build,
+    dependency: *std.Build.Step.Run,
+    build_dir: []const u8,
+) *std.Build.Step.Run {
+    const compile = b.addSystemCommand(&.{
+        "cmake",
+        "--build",
+        build_dir,
+        "--target",
+        project_name,
+        "--parallel",
+    });
+
+    compile.step.dependOn(&dependency.step);
+    return compile;
+}
+
+fn addCompileDatabaseSync(
+    b: *std.Build,
+    configure: *std.Build.Step.Run,
+    build_dir: []const u8,
+) *std.Build.Step.Run {
+    const source = b.fmt("{s}/compile_commands.json", .{build_dir});
+    const sync = b.addSystemCommand(&.{
+        "cmake",
+        "-E",
+        "copy_if_different",
+        source,
+        "compile_commands.json",
+    });
+
+    sync.step.dependOn(&configure.step);
+    return sync;
+}
+EOF
+}
+
+create_saucer_readme() {
+  local build_cmd install_cmd vite_cmd
+  build_cmd=$(runtime_build_command)
+  install_cmd=$(runtime_install_command)
+  vite_cmd=$(runtime_vite_command)
+
+  cat > "$PROJECT_DIR/README.md" <<EOF
+# $PROJECT_NAME
+
+Saucer desktop WebView application with a Vite frontend.
+
+Created by $AUTHOR_NAME <$AUTHOR_EMAIL>
+
+## Frontend initialization
+
+The setup intentionally does not choose a Vite framework for you. Create the
+Vite project inside \`frontend/\` with $FRONTEND_RUNTIME:
+
+\`\`\`bash
+cd frontend
+$vite_cmd
+$install_cmd
+\`\`\`
+
+The \`frontend/tools/dev.mjs\` file is generated by c-setup. Because \`frontend/\`
+is already non-empty, create-vite may warn about the existing \`tools/\` folder.
+Choose the option that keeps/ignores existing files rather than deleting them.
+
+The production frontend command used by this project is:
+
+\`\`\`bash
+$build_cmd
+\`\`\`
+EOF
+
+  if [[ "$SAUCER_BUILD_SYSTEM" == "zig-cmake" ]]; then
+    cat >> "$PROJECT_DIR/README.md" <<'EOF'
+
+## Build commands
+
+```bash
+zig build
+zig build dev
+zig build run
+zig build release
+zig build release-run
+zig build release-clean
+zig build clean
+zig build clean-all
+```
+EOF
+  else
+    cat >> "$PROJECT_DIR/README.md" <<EOF
+
+## CMake + Ninja
+
+Development native build:
+
+\`\`\`bash
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DAPP_DEV_FRONTEND=ON
+cmake --build build --parallel
+EOF
+
+    if [[ "$FRONTEND_RUNTIME" == "bun" ]]; then
+      cat >> "$PROJECT_DIR/README.md" <<EOF
+bun frontend/tools/dev.mjs build/$PROJECT_NAME
+\`\`\`
+EOF
+    else
+      cat >> "$PROJECT_DIR/README.md" <<EOF
+node frontend/tools/dev.mjs build/$PROJECT_NAME
+\`\`\`
+EOF
+    fi
+
+    cat >> "$PROJECT_DIR/README.md" <<EOF
+
+Embedded build:
+
+\`\`\`bash
+cd frontend
+$build_cmd
+cd ..
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DAPP_DEV_FRONTEND=OFF
+cmake --build build --parallel
+\`\`\`
+EOF
+  fi
+}
+
+print_saucer_next_steps() {
+  local vite_cmd install_cmd
+  vite_cmd=$(runtime_vite_command)
+  install_cmd=$(runtime_install_command)
+
+  echo
+  note "Next: create your Vite project inside frontend/ using $FRONTEND_RUNTIME."
+  echo "  cd \"$PROJECT_DIR/frontend\""
+  echo "  $vite_cmd"
+  echo "  $install_cmd"
+  warn "frontend/tools/dev.mjs already exists. If create-vite warns that the directory is not empty, keep/ignore existing files; do not delete tools/."
+
+  if [[ "$SAUCER_BUILD_SYSTEM" == "zig-cmake" ]]; then
+    echo
+    note "Then use:"
+    echo "  zig build dev"
+    echo "  zig build"
+    echo "  zig build run"
+    echo "  zig build release"
+    echo "  zig build release-run"
+    echo "  zig build release-clean"
+    echo "  zig build clean"
+    echo "  zig build clean-all"
+  fi
+}
+
+# ----------------------------------------------------
+# GIT
+
 git_init() {
   if $USE_GIT; then
     info "Initializing Git repository in $PROJECT_DIR"
@@ -592,7 +1454,8 @@ git_init() {
 
 # ----------------------------------------------------
 # PIPELINES
-pipeline_full() {
+
+pipeline_traditional_full() {
   ask_language
   ask_build_system
   ask_git
@@ -600,16 +1463,52 @@ pipeline_full() {
   ask_standards
   ask_author
 
-  create_structure
+  create_traditional_structure
   $USE_MESON && create_meson
   $USE_MAKE && create_makefile
   $USE_CMAKE && create_cmake
+  $USE_ZIG && create_traditional_zig
+  $USE_CLANG_FORMAT && create_clang_format
+  $USE_ZED_SETTINGS && create_zed_settings
+  $USE_CLANG_TIDY && create_clang_tidy
+  create_main
+  git_init
+}
+
+pipeline_saucer_full() {
+  ask_saucer_build_system
+  ask_frontend_runtime
+  ask_git
+  ask_format
+  ask_author
+
+  create_saucer_structure
+  create_saucer_main
+  create_saucer_dev_script
+
+  if [[ "$SAUCER_BUILD_SYSTEM" == "cmake" ]]; then
+    create_saucer_cmake_native
+  else
+    create_saucer_cmake_zig
+  fi
+
   $USE_CLANG_FORMAT && create_clang_format
   $USE_ZED_SETTINGS && create_zed_settings
   $USE_CLANG_TIDY && create_clang_tidy
 
-  create_main
+  create_saucer_readme
   git_init
+  print_saucer_next_steps
+}
+
+pipeline_full() {
+  ask_project_kind
+
+  if [[ "$PROJECT_KIND" == "saucer" ]]; then
+    pipeline_saucer_full
+  else
+    pipeline_traditional_full
+  fi
 }
 
 pipeline_build() {
@@ -619,7 +1518,7 @@ pipeline_build() {
   $USE_MESON && create_meson
   $USE_MAKE && create_makefile
   $USE_CMAKE && create_cmake
-  return 0
+  $USE_ZIG && create_traditional_zig
 }
 
 pipeline_format() {
@@ -629,7 +1528,6 @@ pipeline_format() {
   $USE_CLANG_FORMAT && create_clang_format
   $USE_ZED_SETTINGS && create_zed_settings
   $USE_CLANG_TIDY && create_clang_tidy
-  return 0
 }
 
 pipeline_lang() {
@@ -640,6 +1538,7 @@ pipeline_lang() {
 
 # ----------------------------------------------------
 # MAIN
+
 main() {
   parse_args "$@"
 
@@ -658,5 +1557,4 @@ main() {
   echo "Location: $PROJECT_DIR"
 }
 
-# ENTRY POINT
 main "$@"
