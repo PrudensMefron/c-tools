@@ -141,7 +141,7 @@ MESON_SRC_BASE="executable(
   install: true,
 )"
 
-CMAKE_BASE='cmake_minimum_required(VERSION 3.16)
+CMAKE_BASE='cmake_minimum_required(VERSION {CMAKE_MIN})
 project({PROJECT_NAME} LANGUAGES {LANG_LIST} VERSION 1.0.0)
 
 {STD_CONFIG}
@@ -149,30 +149,56 @@ project({PROJECT_NAME} LANGUAGES {LANG_LIST} VERSION 1.0.0)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 add_compile_options(-Wall -Wextra -Wpedantic)
 
-file(GLOB_RECURSE SOURCES "src/*.c" "src/*.cpp")
+file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS "src/*.c" "src/*.cpp")
 add_executable({PROJECT_NAME} ${SOURCES})
 target_include_directories({PROJECT_NAME} PRIVATE include)
 '
 
-MAKEFILE_BASE='CC := {CC}
-CXX := {CXX}
+XMAKE_BASE='set_project("{PROJECT_NAME}")
+set_version("1.0.0")
+
+-- This is a minimum API level, not a pinned Xmake executable version.
+-- The installed Xmake is used normally.
+set_xmakever("2.8.3")
+
+add_rules("mode.debug", "mode.release")
+add_rules("plugin.compile_commands.autoupdate")
+
+set_defaultmode("debug")
+set_policy("build.warning", true)
+set_policy("run.autobuild", true)
+
+set_languages({LANGUAGES})
+set_warnings("all", "extra", "pedantic")
+
+target("{PROJECT_NAME}")
+    set_kind("binary")
+    add_files({SOURCES})
+    add_includedirs("include")
+'
+
+MAKEFILE_BASE='CC ?= cc
+CXX ?= c++
+
 CFLAGS := -Wall -Wextra -Wpedantic {C_STD} -Iinclude
 CXXFLAGS := -Wall -Wextra -Wpedantic {CPP_STD} -Iinclude
 LDFLAGS :=
+
 SRC := src
 OBJ := obj
 BIN := bin
 TARGET := {PROJECT_NAME}
 
-SOURCES := $(wildcard $(SRC)/*.c) $(wildcard $(SRC)/*.cpp)
+SOURCES := {SOURCES}
 OBJECTS := $(patsubst $(SRC)/%.c,$(OBJ)/%.o,$(patsubst $(SRC)/%.cpp,$(OBJ)/%.o,$(SOURCES)))
+LINKER := {LINKER}
 
 .PHONY: all clean run
 
 all: $(BIN)/$(TARGET)
 
 $(BIN)/$(TARGET): $(OBJECTS) | $(BIN)
-	$(CXX) $(LDFLAGS) -o $@ $^
+	$(LINKER) $(LDFLAGS) -o $@ $^
 
 $(OBJ)/%.o: $(SRC)/%.c | $(OBJ)
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -196,7 +222,7 @@ int main (int argc, char* argv[])
 {
     (void)argc;
     (void)argv;
-    printf ("Hello from C project: {PROJECT_NAME}!\\n");
+    printf ("Hello from C project: {PROJECT_NAME}!\n");
     return 0;
 }
 '
@@ -508,33 +534,34 @@ process.on("SIGTERM", () => {
 })
 '
 
+# ----------------------------------------------------
+# STATE
+
 PROJECT_NAME=""
 PROJECT_DIR=""
 PROJECT_KIND=""
 LANG_CHOICE=""
-
-USE_MESON=false
-USE_CMAKE=false
-USE_MAKE=false
-USE_ZIG=false
-USE_GIT=false
-USE_CLANG_FORMAT=false
-USE_CLANG_TIDY=false
-USE_ZED_SETTINGS=false
+BUILD_SYSTEM=""
 
 SAUCER_BUILD_SYSTEM=""
 FRONTEND_RUNTIME=""
 
 C_STANDARD="c11"
 CPP_STANDARD="c++17"
+REQUESTED_STD=""
+
 AUTHOR_NAME=""
 AUTHOR_EMAIL=""
 
-FLAG_BUILD_ONLY=false
-FLAG_LANG_ONLY=false
-FLAG_GIT_ONLY=false
-FLAG_FORMAT_ONLY=false
-FLAG_FULL_SETUP=true
+USE_GIT=false
+USE_CLANG_FORMAT=false
+USE_CLANG_TIDY=false
+USE_ZED_SETTINGS=false
+
+MODE="full"
+INTERACTIVE=true
+AUTO_CONFIRM=false
+DRY_RUN=false
 
 # ----------------------------------------------------
 # AUXILIARY FUNCTIONS
@@ -544,13 +571,143 @@ info() { echo -e "${GREEN}Success: $*${NC}"; }
 warn() { echo -e "${YELLOW}Warn: $*${NC}"; }
 note() { echo -e "${CYAN}$*${NC}"; }
 
+require_value() {
+  local option="$1"
+  local value="${2:-}"
+
+  [[ -n "$value" && ! "$value" =~ ^- ]] ||
+    die "Option '$option' requires a value."
+}
+
+require_command() {
+  local command_name="$1"
+
+  command -v "$command_name" >/dev/null 2>&1 ||
+    die "Required command not found: $command_name"
+}
+
 validate_project_name() {
-  [[ "$PROJECT_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || \
+  [[ "$PROJECT_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] ||
     die "Project name must use only letters, numbers, '.', '_' or '-', and must start with a letter or number."
 }
 
+validate_language() {
+  case "$LANG_CHOICE" in
+    c|cpp|both) ;;
+    *) die "Invalid language '$LANG_CHOICE'. Use c, cpp or both." ;;
+  esac
+}
+
+validate_build_system_name() {
+  case "$BUILD_SYSTEM" in
+    meson|cmake|xmake|zig|make|none) ;;
+    *) die "Invalid build system '$BUILD_SYSTEM'. Use meson, cmake, xmake, zig, make or none." ;;
+  esac
+}
+
+validate_project_kind_name() {
+  case "$PROJECT_KIND" in
+    traditional|saucer) ;;
+    *) die "Invalid project type '$PROJECT_KIND'. Use traditional or saucer." ;;
+  esac
+}
+
+validate_saucer_build_system_name() {
+  case "$SAUCER_BUILD_SYSTEM" in
+    cmake|zig-cmake) ;;
+    *) die "Invalid Saucer build system '$SAUCER_BUILD_SYSTEM'. Use cmake or zig-cmake." ;;
+  esac
+}
+
+validate_frontend_runtime_name() {
+  case "$FRONTEND_RUNTIME" in
+    bun|pnpm|npm|yarn) ;;
+    *) die "Invalid frontend runtime '$FRONTEND_RUNTIME'. Use bun, pnpm, npm or yarn." ;;
+  esac
+}
+
+validate_c_standard() {
+  case "$C_STANDARD" in
+    c89|c99|c11|c17|c23) ;;
+    *) die "Invalid C standard '$C_STANDARD'. Use c89, c99, c11, c17 or c23." ;;
+  esac
+}
+
+validate_cpp_standard() {
+  case "$CPP_STANDARD" in
+    c++11|c++14|c++17|c++20|c++23) ;;
+    *) die "Invalid C++ standard '$CPP_STANDARD'. Use c++11, c++14, c++17, c++20 or c++23." ;;
+  esac
+}
+
+version_ge() {
+  local current="$1"
+  local minimum="$2"
+
+  [[ "$(printf '%s\n%s\n' "$minimum" "$current" | sort -V | head -n1)" == "$minimum" ]]
+}
+
+validate_zig_version() {
+  local version
+  version="$(zig version)"
+
+  case "$version" in
+    0.16.*) ;;
+    *)
+      die "The generated build.zig targets Zig 0.16.x, but the installed version is '$version'."
+      ;;
+  esac
+}
+
+validate_cmake_version() {
+  local minimum="$1"
+  local version
+
+  version="$(cmake --version | head -n1 | awk '{print $3}')"
+
+  if [[ -z "$version" || ! "$version" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+    warn "Could not determine the installed CMake version. The generated project requires CMake >= $minimum."
+    return
+  fi
+
+  version_ge "$version" "$minimum" ||
+    die "The generated project requires CMake >= $minimum, but '$version' is installed."
+}
+
+validate_xmake_version() {
+  local version
+  version="$(xmake --version 2>/dev/null | head -n1 | sed -E 's/.*v([0-9]+\.[0-9]+\.[0-9]+).*/\1/')"
+
+  if [[ -z "$version" || ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    warn "Could not determine the installed Xmake version. The generated file requires Xmake >= 2.8.3."
+    return
+  fi
+
+  version_ge "$version" "2.8.3" ||
+    die "The generated xmake.lua requires Xmake >= 2.8.3, but '$version' is installed."
+}
+
+resolve_requested_standard() {
+  [[ -z "$REQUESTED_STD" ]] && return
+
+  case "$LANG_CHOICE" in
+    c)
+      C_STANDARD="$REQUESTED_STD"
+      ;;
+    cpp)
+      CPP_STANDARD="$REQUESTED_STD"
+      ;;
+    both)
+      die "--std is ambiguous with --language both. Use --c-std and --cpp-std."
+      ;;
+  esac
+}
+
 get_author_info() {
-  local git_name git_email
+  local git_name=""
+  local git_email=""
+
+  command -v git >/dev/null 2>&1 || return 0
 
   git_name=$(git config --local --get user.name 2>/dev/null || true)
   git_email=$(git config --local --get user.email 2>/dev/null || true)
@@ -558,8 +715,8 @@ get_author_info() {
   [[ -z "$git_name" ]] && git_name=$(git config --global --get user.name 2>/dev/null || true)
   [[ -z "$git_email" ]] && git_email=$(git config --global --get user.email 2>/dev/null || true)
 
-  AUTHOR_NAME="${git_name:-}"
-  AUTHOR_EMAIL="${git_email:-}"
+  [[ -z "$AUTHOR_NAME" ]] && AUTHOR_NAME="${git_name:-}"
+  [[ -z "$AUTHOR_EMAIL" ]] && AUTHOR_EMAIL="${git_email:-}"
 }
 
 runtime_build_command() {
@@ -592,6 +749,39 @@ runtime_vite_command() {
   esac
 }
 
+cmake_c_standard_value() {
+  case "$C_STANDARD" in
+    c89) echo "90" ;;
+    *) echo "${C_STANDARD#c}" ;;
+  esac
+}
+
+cmake_minimum_version() {
+  local minor=16
+
+  if [[ "$LANG_CHOICE" == "c" || "$LANG_CHOICE" == "both" ]]; then
+    case "$C_STANDARD" in
+      c17|c23) minor=21 ;;
+    esac
+  fi
+
+  if [[ "$LANG_CHOICE" == "cpp" || "$LANG_CHOICE" == "both" ]]; then
+    if [[ "$CPP_STANDARD" == "c++23" && "$minor" -lt 20 ]]; then
+      minor=20
+    fi
+  fi
+
+  echo "3.$minor"
+}
+
+author_line() {
+  if [[ -n "$AUTHOR_NAME" && -n "$AUTHOR_EMAIL" ]]; then
+    printf 'Created by %s <%s>\n' "$AUTHOR_NAME" "$AUTHOR_EMAIL"
+  elif [[ -n "$AUTHOR_NAME" ]]; then
+    printf 'Created by %s\n' "$AUTHOR_NAME"
+  fi
+}
+
 # ----------------------------------------------------
 # INTERACTIVE QUESTIONS
 
@@ -601,9 +791,19 @@ ask_project_kind() {
   echo -e "\nChoose project type:"
   select opt in "Traditional C/C++" "Desktop WebView with Saucer"; do
     case $REPLY in
-      1) PROJECT_KIND="traditional"; break ;;
-      2) PROJECT_KIND="saucer"; LANG_CHOICE="cpp"; CPP_STANDARD="c++23"; break ;;
-      *) warn "Invalid option." ;;
+      1)
+        PROJECT_KIND="traditional"
+        break
+        ;;
+      2)
+        PROJECT_KIND="saucer"
+        LANG_CHOICE="cpp"
+        CPP_STANDARD="c++23"
+        break
+        ;;
+      *)
+        warn "Invalid option."
+        ;;
     esac
   done
 }
@@ -623,21 +823,32 @@ ask_language() {
 }
 
 ask_build_system() {
+  [[ -n "$BUILD_SYSTEM" ]] && return
+
   echo -e "\nChoose a build system:"
-  select build in "Meson + Ninja (default)" "CMake + Ninja" "Zig" "Makefile" "All" "None"; do
+  select build in \
+    "Meson + Ninja (default)" \
+    "CMake + Ninja" \
+    "Xmake" \
+    "Zig" \
+    "Makefile" \
+    "None"; do
+
     case $REPLY in
-      1) USE_MESON=true; break ;;
-      2) USE_CMAKE=true; break ;;
-      3) USE_ZIG=true; break ;;
-      4) USE_MAKE=true; break ;;
-      5) USE_MESON=true; USE_CMAKE=true; USE_ZIG=true; USE_MAKE=true; break ;;
-      6) break ;;
+      1) BUILD_SYSTEM="meson"; break ;;
+      2) BUILD_SYSTEM="cmake"; break ;;
+      3) BUILD_SYSTEM="xmake"; break ;;
+      4) BUILD_SYSTEM="zig"; break ;;
+      5) BUILD_SYSTEM="make"; break ;;
+      6) BUILD_SYSTEM="none"; break ;;
       *) warn "Invalid option." ;;
     esac
   done
 }
 
 ask_saucer_build_system() {
+  [[ -n "$SAUCER_BUILD_SYSTEM" ]] && return
+
   echo -e "\nChoose the Saucer build system:"
   select build in "CMake + Ninja" "Zig + CMake + Ninja"; do
     case $REPLY in
@@ -649,6 +860,8 @@ ask_saucer_build_system() {
 }
 
 ask_frontend_runtime() {
+  [[ -n "$FRONTEND_RUNTIME" ]] && return
+
   echo -e "\nChoose the frontend package manager/runtime:"
   select runtime in "Bun" "Pnpm" "Npm" "Yarn"; do
     case $REPLY in
@@ -662,21 +875,21 @@ ask_frontend_runtime() {
 }
 
 ask_git() {
-  read -rp $'\nInitialize a blank Git repository? [Y/N] ' ans
-  if [[ "$ans" =~ ^([yY]|$) ]]; then
+  read -rp $'\nInitialize a blank Git repository? [Y/n] ' ans
+  if [[ "$ans" =~ ^([yY]|[yY][eE][sS]|)$ ]]; then
     USE_GIT=true
   fi
 }
 
 ask_format() {
-  read -rp $'\nAdd Allman++ .clang-format? [Y/N] ' ans
-  if [[ "$ans" =~ ^([yY]|$) ]]; then
+  read -rp $'\nAdd Allman++ .clang-format? [Y/n] ' ans
+  if [[ "$ans" =~ ^([yY]|[yY][eE][sS]|)$ ]]; then
     USE_CLANG_FORMAT=true
     USE_ZED_SETTINGS=true
   fi
 
-  read -rp $'\nAdd .clang-tidy? [Y/N] ' ans
-  if [[ "$ans" =~ ^([yY]|$) ]]; then
+  read -rp $'\nAdd .clang-tidy? [Y/n] ' ans
+  if [[ "$ans" =~ ^([yY]|[yY][eE][sS]|)$ ]]; then
     USE_CLANG_TIDY=true
   fi
 }
@@ -686,8 +899,13 @@ ask_standards() {
     echo -e "\nSelect C standard:"
     select std in "c89" "c99" "c11" "c17" "c23"; do
       case $REPLY in
-        1|2|3|4|5) C_STANDARD="$std"; break ;;
-        *) warn "Invalid option." ;;
+        1|2|3|4|5)
+          C_STANDARD="$std"
+          break
+          ;;
+        *)
+          warn "Invalid option."
+          ;;
       esac
     done
   fi
@@ -696,8 +914,13 @@ ask_standards() {
     echo -e "\nSelect C++ standard:"
     select std in "c++11" "c++14" "c++17" "c++20" "c++23"; do
       case $REPLY in
-        1|2|3|4|5) CPP_STANDARD="$std"; break ;;
-        *) warn "Invalid option." ;;
+        1|2|3|4|5)
+          CPP_STANDARD="$std"
+          break
+          ;;
+        *)
+          warn "Invalid option."
+          ;;
       esac
     done
   fi
@@ -707,9 +930,14 @@ ask_author() {
   get_author_info
 
   if [[ -n "$AUTHOR_NAME" ]]; then
-    info "Author detected: $AUTHOR_NAME <$AUTHOR_EMAIL>"
-    read -rp $'Use this author info? [Y/N] ' ans
-    if [[ ! "$ans" =~ ^([yY]|$) ]]; then
+    if [[ -n "$AUTHOR_EMAIL" ]]; then
+      info "Author detected: $AUTHOR_NAME <$AUTHOR_EMAIL>"
+    else
+      info "Author detected: $AUTHOR_NAME"
+    fi
+
+    read -rp $'Use this author info? [Y/n] ' ans
+    if [[ ! "$ans" =~ ^([yY]|[yY][eE][sS]|)$ ]]; then
       read -rp $'New author name: ' AUTHOR_NAME
       read -rp $'New author email: ' AUTHOR_EMAIL
     fi
@@ -720,6 +948,15 @@ ask_author() {
   fi
 }
 
+confirm_plan() {
+  $AUTO_CONFIRM && return 0
+  ! $INTERACTIVE && return 0
+
+  read -rp $'\nCreate project with these settings? [Y/n] ' ans
+  [[ "$ans" =~ ^([yY]|[yY][eE][sS]|)$ ]] ||
+    die "Operation cancelled."
+}
+
 # ----------------------------------------------------
 # CLI
 
@@ -727,15 +964,62 @@ usage() {
   cat <<'EOF'
 Usage: c-setup [options] [project_name]
 
-Options:
-  -b, --build   Setup only a traditional build system
-  -l, --lang    Setup only the language and main source file
-  -g, --git     Initialize a Git repository only
-  -f, --format  Setup Allman++ clang-format, Zed settings and clang-tidy only
-  -h, --help    Show this help message
+Operation modes:
+  -b, --build                 Setup only a traditional build system
+  -l, --lang [c|cpp|both]     Setup only the language and main source file
+      --lang-only [lang]      Same as --lang
+  -g, --git                   Initialize a Git repository only
+  -f, --format                Setup clang-format, Zed settings and clang-tidy only
+  -h, --help                  Show this help message
 
-Without options, c-setup runs the full interactive setup. The full setup can
-create either a traditional C/C++ project or a Saucer desktop WebView project.
+Full/project configuration:
+      --type TYPE              traditional | saucer
+      --language LANG          c | cpp | both
+      --build-system SYSTEM    meson | cmake | xmake | zig | make | none
+      --std STANDARD           Standard for the selected single language
+      --c-std STANDARD         c89 | c99 | c11 | c17 | c23
+      --cpp-std STANDARD       c++11 | c++14 | c++17 | c++20 | c++23
+
+Saucer:
+      --saucer-build SYSTEM    cmake | zig-cmake
+      --runtime RUNTIME        bun | pnpm | npm | yarn
+
+Optional project files:
+      --init-git               Initialize Git in a full setup
+      --no-init-git            Do not initialize Git
+      --clang-format           Generate Allman++ .clang-format
+      --no-clang-format        Do not generate .clang-format
+      --clang-tidy             Generate .clang-tidy
+      --no-clang-tidy          Do not generate .clang-tidy
+      --zed-settings           Generate .zed/settings.json
+      --no-zed-settings        Do not generate Zed project settings
+
+Metadata and execution:
+      --author-name NAME       Set README author name
+      --author-email EMAIL     Set README author email
+      --non-interactive        Do not ask questions; use supplied values/defaults
+  -y, --yes                    Skip the final confirmation
+      --dry-run                Show the resolved plan without writing files
+
+Non-interactive full setup defaults:
+  type=traditional, language=cpp, build-system=meson,
+  C standard=c11, C++ standard=c++17.
+
+Examples:
+  c-setup hello
+
+  c-setup hello \
+    --non-interactive \
+    --type traditional \
+    --language cpp \
+    --std c++23 \
+    --build-system xmake \
+    --init-git \
+    --clang-format \
+    --clang-tidy \
+    --zed-settings
+
+  c-setup --build --language cpp --cpp-std c++23 --build-system xmake
 EOF
   exit 0
 }
@@ -743,10 +1027,13 @@ EOF
 parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      -b|--build) FLAG_BUILD_ONLY=true; FLAG_FULL_SETUP=false; shift ;;
-      -l|--lang)
-        FLAG_LANG_ONLY=true
-        FLAG_FULL_SETUP=false
+      -b|--build)
+        MODE="build"
+        shift
+        ;;
+
+      -l|--lang|--lang-only)
+        MODE="lang"
         if [[ -n "${2:-}" && ! "$2" =~ ^- ]]; then
           LANG_CHOICE="$2"
           shift 2
@@ -754,10 +1041,140 @@ parse_args() {
           shift
         fi
         ;;
-      -g|--git) FLAG_GIT_ONLY=true; FLAG_FULL_SETUP=false; shift ;;
-      -f|--format) FLAG_FORMAT_ONLY=true; FLAG_FULL_SETUP=false; shift ;;
-      -h|--help) usage ;;
-      -*) die "Unknown option: $1. Use -h for help." ;;
+
+      -g|--git)
+        MODE="git"
+        shift
+        ;;
+
+      -f|--format)
+        MODE="format"
+        shift
+        ;;
+
+      --type)
+        require_value "$1" "${2:-}"
+        PROJECT_KIND="$2"
+        shift 2
+        ;;
+
+      --language)
+        require_value "$1" "${2:-}"
+        LANG_CHOICE="$2"
+        shift 2
+        ;;
+
+      --build-system)
+        require_value "$1" "${2:-}"
+        BUILD_SYSTEM="$2"
+        shift 2
+        ;;
+
+      --std)
+        require_value "$1" "${2:-}"
+        REQUESTED_STD="$2"
+        shift 2
+        ;;
+
+      --c-std)
+        require_value "$1" "${2:-}"
+        C_STANDARD="$2"
+        shift 2
+        ;;
+
+      --cpp-std)
+        require_value "$1" "${2:-}"
+        CPP_STANDARD="$2"
+        shift 2
+        ;;
+
+      --saucer-build)
+        require_value "$1" "${2:-}"
+        SAUCER_BUILD_SYSTEM="$2"
+        shift 2
+        ;;
+
+      --runtime)
+        require_value "$1" "${2:-}"
+        FRONTEND_RUNTIME="$2"
+        shift 2
+        ;;
+
+      --init-git)
+        USE_GIT=true
+        shift
+        ;;
+
+      --no-init-git)
+        USE_GIT=false
+        shift
+        ;;
+
+      --clang-format)
+        USE_CLANG_FORMAT=true
+        shift
+        ;;
+
+      --no-clang-format)
+        USE_CLANG_FORMAT=false
+        shift
+        ;;
+
+      --clang-tidy)
+        USE_CLANG_TIDY=true
+        shift
+        ;;
+
+      --no-clang-tidy)
+        USE_CLANG_TIDY=false
+        shift
+        ;;
+
+      --zed-settings)
+        USE_ZED_SETTINGS=true
+        shift
+        ;;
+
+      --no-zed-settings)
+        USE_ZED_SETTINGS=false
+        shift
+        ;;
+
+      --author-name)
+        require_value "$1" "${2:-}"
+        AUTHOR_NAME="$2"
+        shift 2
+        ;;
+
+      --author-email)
+        require_value "$1" "${2:-}"
+        AUTHOR_EMAIL="$2"
+        shift 2
+        ;;
+
+      --non-interactive)
+        INTERACTIVE=false
+        shift
+        ;;
+
+      -y|--yes)
+        AUTO_CONFIRM=true
+        shift
+        ;;
+
+      --dry-run)
+        DRY_RUN=true
+        shift
+        ;;
+
+      -h|--help)
+        usage
+        ;;
+
+      -*)
+        die "Unknown option: $1. Use -h for help."
+        ;;
+
       *)
         if [[ -z "$PROJECT_NAME" ]]; then
           PROJECT_NAME="$1"
@@ -770,9 +1187,13 @@ parse_args() {
   done
 
   if [[ -z "$PROJECT_NAME" ]]; then
-    if $FLAG_FULL_SETUP; then
-      read -rp "Project name: " PROJECT_NAME
-      [[ -z "$PROJECT_NAME" ]] && die "Project name is required."
+    if [[ "$MODE" == "full" ]]; then
+      if $INTERACTIVE; then
+        read -rp "Project name: " PROJECT_NAME
+        [[ -n "$PROJECT_NAME" ]] || die "Project name is required."
+      else
+        die "Project name is required in non-interactive full setup."
+      fi
     else
       PROJECT_NAME=$(basename "$(pwd)")
     fi
@@ -784,6 +1205,7 @@ parse_args() {
     PROJECT_DIR="$(pwd)"
   else
     PROJECT_DIR="$(pwd)/$PROJECT_NAME"
+
     if [[ -d "$PROJECT_DIR" && -n "$(ls -A "$PROJECT_DIR" 2>/dev/null)" ]]; then
       die "Directory '$PROJECT_NAME' already exists and is not empty."
     fi
@@ -791,43 +1213,321 @@ parse_args() {
 }
 
 # ----------------------------------------------------
+# PLAN / DEFAULT RESOLUTION
+
+resolve_full_configuration() {
+  if $INTERACTIVE; then
+    ask_project_kind
+
+    if [[ "$PROJECT_KIND" == "saucer" ]]; then
+      LANG_CHOICE="cpp"
+      CPP_STANDARD="c++23"
+      ask_saucer_build_system
+      ask_frontend_runtime
+      ask_git
+      ask_format
+      ask_author
+    else
+      ask_language
+      ask_build_system
+      ask_git
+      ask_format
+      ask_standards
+      ask_author
+    fi
+  else
+    PROJECT_KIND="${PROJECT_KIND:-traditional}"
+
+    if [[ "$PROJECT_KIND" == "saucer" ]]; then
+      LANG_CHOICE="cpp"
+      CPP_STANDARD="c++23"
+      SAUCER_BUILD_SYSTEM="${SAUCER_BUILD_SYSTEM:-cmake}"
+      FRONTEND_RUNTIME="${FRONTEND_RUNTIME:-bun}"
+    else
+      LANG_CHOICE="${LANG_CHOICE:-cpp}"
+      BUILD_SYSTEM="${BUILD_SYSTEM:-meson}"
+      resolve_requested_standard
+    fi
+
+    get_author_info
+  fi
+
+  validate_project_kind_name
+
+  if [[ "$PROJECT_KIND" == "saucer" ]]; then
+    validate_saucer_build_system_name
+    validate_frontend_runtime_name
+  else
+    validate_language
+    validate_build_system_name
+    validate_c_standard
+    validate_cpp_standard
+  fi
+}
+
+resolve_build_configuration() {
+  if $INTERACTIVE; then
+    ask_language
+    ask_build_system
+    ask_standards
+  else
+    LANG_CHOICE="${LANG_CHOICE:-cpp}"
+    BUILD_SYSTEM="${BUILD_SYSTEM:-meson}"
+    resolve_requested_standard
+  fi
+
+  validate_language
+  validate_build_system_name
+  validate_c_standard
+  validate_cpp_standard
+}
+
+resolve_lang_configuration() {
+  if $INTERACTIVE; then
+    ask_language
+  else
+    LANG_CHOICE="${LANG_CHOICE:-cpp}"
+  fi
+
+  validate_language
+}
+
+resolve_format_configuration() {
+  if $INTERACTIVE; then
+    ask_format
+  fi
+}
+
+print_plan() {
+  echo
+  note "Resolved project plan:"
+  printf '  Project: %s\n' "$PROJECT_NAME"
+  printf '  Location: %s\n' "$PROJECT_DIR"
+  printf '  Operation: %s\n' "$MODE"
+
+  case "$MODE" in
+    full)
+      printf '  Type: %s\n' "$PROJECT_KIND"
+
+      if [[ "$PROJECT_KIND" == "saucer" ]]; then
+        printf '  Language: C++\n'
+        printf '  C++ standard: c++23\n'
+        printf '  Saucer build: %s\n' "$SAUCER_BUILD_SYSTEM"
+        printf '  Frontend runtime: %s\n' "$FRONTEND_RUNTIME"
+      else
+        printf '  Language: %s\n' "$LANG_CHOICE"
+        printf '  Build system: %s\n' "$BUILD_SYSTEM"
+        [[ "$LANG_CHOICE" == "c" || "$LANG_CHOICE" == "both" ]] &&
+          printf '  C standard: %s\n' "$C_STANDARD"
+        [[ "$LANG_CHOICE" == "cpp" || "$LANG_CHOICE" == "both" ]] &&
+          printf '  C++ standard: %s\n' "$CPP_STANDARD"
+      fi
+
+      printf '  Git: %s\n' "$USE_GIT"
+      printf '  clang-format: %s\n' "$USE_CLANG_FORMAT"
+      printf '  clang-tidy: %s\n' "$USE_CLANG_TIDY"
+      printf '  Zed settings: %s\n' "$USE_ZED_SETTINGS"
+      ;;
+
+    build)
+      printf '  Language: %s\n' "$LANG_CHOICE"
+      printf '  Build system: %s\n' "$BUILD_SYSTEM"
+      [[ "$LANG_CHOICE" == "c" || "$LANG_CHOICE" == "both" ]] &&
+        printf '  C standard: %s\n' "$C_STANDARD"
+      [[ "$LANG_CHOICE" == "cpp" || "$LANG_CHOICE" == "both" ]] &&
+        printf '  C++ standard: %s\n' "$CPP_STANDARD"
+      ;;
+
+    lang)
+      printf '  Language: %s\n' "$LANG_CHOICE"
+      ;;
+
+    git)
+      printf '  Git repository: initialize\n'
+      ;;
+
+    format)
+      printf '  clang-format: %s\n' "$USE_CLANG_FORMAT"
+      printf '  clang-tidy: %s\n' "$USE_CLANG_TIDY"
+      printf '  Zed settings: %s\n' "$USE_ZED_SETTINGS"
+      ;;
+  esac
+}
+
+# ----------------------------------------------------
+# ENVIRONMENT VALIDATION
+
+validate_traditional_build_environment() {
+  case "$BUILD_SYSTEM" in
+    meson)
+      require_command meson
+      require_command ninja
+      ;;
+    cmake)
+      require_command cmake
+      require_command ninja
+      validate_cmake_version "$(cmake_minimum_version)"
+      ;;
+    xmake)
+      require_command xmake
+      validate_xmake_version
+      ;;
+    zig)
+      require_command zig
+      validate_zig_version
+      ;;
+    make)
+      require_command make
+      ;;
+    none)
+      ;;
+  esac
+}
+
+validate_saucer_environment() {
+  require_command cmake
+  require_command ninja
+
+  if [[ "$SAUCER_BUILD_SYSTEM" == "zig-cmake" ]]; then
+    validate_cmake_version "3.31"
+    require_command zig
+    validate_zig_version
+  else
+    validate_cmake_version "3.25"
+  fi
+
+  require_command "$FRONTEND_RUNTIME"
+
+  if [[ "$FRONTEND_RUNTIME" != "bun" ]]; then
+    require_command node
+  fi
+}
+
+validate_environment() {
+  $DRY_RUN && return 0
+
+  case "$MODE" in
+    full)
+      if [[ "$PROJECT_KIND" == "saucer" ]]; then
+        validate_saucer_environment
+      else
+        validate_traditional_build_environment
+      fi
+
+      $USE_GIT && require_command git
+      ;;
+
+    build)
+      validate_traditional_build_environment
+      ;;
+
+    git)
+      require_command git
+      ;;
+  esac
+
+  return 0
+}
+
+# ----------------------------------------------------
 # COMMON FILE CREATION
 
-create_traditional_structure() {
-  info "Creating traditional project structure in $PROJECT_DIR"
-  mkdir -p "$PROJECT_DIR"/{src,include,tests,build,docs,external}
-
-  cat > "$PROJECT_DIR/README.md" <<EOF
-# $PROJECT_NAME
-Created by $AUTHOR_NAME <$AUTHOR_EMAIL>
-
-## Build
-EOF
-
+create_base_gitignore() {
   cat > "$PROJECT_DIR/.gitignore" <<'EOF'
-build/
-builddir/
-zig-out/
-.zig-cache/
-obj/
-bin/
+# Compiled objects and libraries
 *.o
+*.obj
 *.a
 *.so
+*.dylib
+*.dll
 *.exe
+
+# Compilation database
+compile_commands.json
+
+# Editor-local state
 .vscode/
 .idea/
+EOF
+
+  if ! $USE_ZED_SETTINGS; then
+    cat >> "$PROJECT_DIR/.gitignore" <<'EOF'
 .zed/
+EOF
+  fi
+}
+
+append_build_gitignore() {
+  case "$BUILD_SYSTEM" in
+    meson)
+      cat >> "$PROJECT_DIR/.gitignore" <<'EOF'
+
+# Meson
+builddir/
+EOF
+      ;;
+
+    cmake)
+      cat >> "$PROJECT_DIR/.gitignore" <<'EOF'
+
+# CMake
+build/
 CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake
-compile_commands.json
-meson-private/
-meson-logs/
 EOF
+      ;;
 
-  if $USE_MESON; then
-    cat >> "$PROJECT_DIR/README.md" <<EOF
+    xmake)
+      cat >> "$PROJECT_DIR/.gitignore" <<'EOF'
+
+# Xmake
+build/
+.xmake/
+EOF
+      ;;
+
+    zig)
+      cat >> "$PROJECT_DIR/.gitignore" <<'EOF'
+
+# Zig
+zig-out/
+.zig-cache/
+EOF
+      ;;
+
+    make)
+      cat >> "$PROJECT_DIR/.gitignore" <<'EOF'
+
+# Make
+obj/
+bin/
+EOF
+      ;;
+
+    none)
+      ;;
+  esac
+}
+
+create_readme_header() {
+  {
+    printf '# %s\n' "$PROJECT_NAME"
+    local byline
+    byline="$(author_line)"
+    if [[ -n "$byline" ]]; then
+      printf '%s\n' "$byline"
+    fi
+  } > "$PROJECT_DIR/README.md"
+}
+
+append_traditional_readme() {
+  case "$BUILD_SYSTEM" in
+    meson)
+      cat >> "$PROJECT_DIR/README.md" <<EOF
+
+## Build
 
 ### Meson + Ninja
 
@@ -837,10 +1537,12 @@ meson compile -C builddir
 ./builddir/$PROJECT_NAME
 \`\`\`
 EOF
-  fi
+      ;;
 
-  if $USE_CMAKE; then
-    cat >> "$PROJECT_DIR/README.md" <<EOF
+    cmake)
+      cat >> "$PROJECT_DIR/README.md" <<EOF
+
+## Build
 
 ### CMake + Ninja
 
@@ -850,10 +1552,48 @@ cmake --build build
 ./build/$PROJECT_NAME
 \`\`\`
 EOF
-  fi
+      ;;
 
-  if $USE_ZIG; then
-    cat >> "$PROJECT_DIR/README.md" <<'EOF'
+    xmake)
+      cat >> "$PROJECT_DIR/README.md" <<EOF
+
+## Build
+
+### Xmake
+
+Debug is the default build mode:
+
+\`\`\`bash
+xmake
+xmake run
+\`\`\`
+
+Release:
+
+\`\`\`bash
+xmake f -m release
+xmake
+xmake run
+\`\`\`
+
+Return to debug:
+
+\`\`\`bash
+xmake f -m debug
+\`\`\`
+
+Clean:
+
+\`\`\`bash
+xmake clean
+\`\`\`
+EOF
+      ;;
+
+    zig)
+      cat >> "$PROJECT_DIR/README.md" <<'EOF'
+
+## Build
 
 ### Zig
 
@@ -866,52 +1606,109 @@ zig build release-clean
 zig build clean
 ```
 EOF
-  fi
+      ;;
+
+    make)
+      cat >> "$PROJECT_DIR/README.md" <<'EOF'
+
+## Build
+
+### Make
+
+```bash
+make
+make run
+make clean
+```
+EOF
+      ;;
+
+    none)
+      ;;
+  esac
+}
+
+create_traditional_structure() {
+  info "Creating traditional project structure in $PROJECT_DIR"
+
+  mkdir -p "$PROJECT_DIR"/{src,include,tests,docs}
+
+  create_readme_header
+  create_base_gitignore
+  append_build_gitignore
+  append_traditional_readme
 }
 
 create_makefile() {
   info "Generating Makefile"
-  local cc="gcc" cxx="g++"
+
   local content="$MAKEFILE_BASE"
+  local sources
+  local linker
+
+  case "$LANG_CHOICE" in
+    c)
+      sources='$(wildcard $(SRC)/*.c)'
+      linker='$(CC)'
+      ;;
+    cpp)
+      sources='$(wildcard $(SRC)/*.cpp)'
+      linker='$(CXX)'
+      ;;
+    both)
+      sources='$(wildcard $(SRC)/*.c) $(wildcard $(SRC)/*.cpp)'
+      linker='$(CXX)'
+      ;;
+  esac
 
   content="${content//\{PROJECT_NAME\}/$PROJECT_NAME}"
-  content="${content//\{CC\}/$cc}"
-  content="${content//\{CXX\}/$cxx}"
   content="${content//\{C_STD\}/-std=$C_STANDARD}"
   content="${content//\{CPP_STD\}/-std=$CPP_STANDARD}"
+  content="${content//\{SOURCES\}/$sources}"
+  content="${content//\{LINKER\}/$linker}"
 
   printf '%s\n' "$content" > "$PROJECT_DIR/Makefile"
-  mkdir -p "$PROJECT_DIR"/{obj,bin}
 }
 
 create_cmake() {
   info "Generating CMakeLists.txt"
+
   local lang_list="C"
   local std_config
   local content="$CMAKE_BASE"
+  local cmake_min
+  local c_std_value
+
+  cmake_min="$(cmake_minimum_version)"
+  c_std_value="$(cmake_c_standard_value)"
 
   [[ "$LANG_CHOICE" == "cpp" ]] && lang_list="CXX"
   [[ "$LANG_CHOICE" == "both" ]] && lang_list="C CXX"
 
-  std_config="set(CMAKE_C_STANDARD ${C_STANDARD#c})\nset(CMAKE_C_STANDARD_REQUIRED ON)"
-  [[ "$LANG_CHOICE" == "cpp" ]] && \
-    std_config="set(CMAKE_CXX_STANDARD ${CPP_STANDARD#c++})\nset(CMAKE_CXX_STANDARD_REQUIRED ON)"
-  [[ "$LANG_CHOICE" == "both" ]] && \
-    std_config="set(CMAKE_C_STANDARD ${C_STANDARD#c})\nset(CMAKE_CXX_STANDARD ${CPP_STANDARD#c++})\nset(CMAKE_C_STANDARD_REQUIRED ON)\nset(CMAKE_CXX_STANDARD_REQUIRED ON)"
+  std_config="set(CMAKE_C_STANDARD $c_std_value)\nset(CMAKE_C_STANDARD_REQUIRED ON)\nset(CMAKE_C_EXTENSIONS OFF)"
+
+  if [[ "$LANG_CHOICE" == "cpp" ]]; then
+    std_config="set(CMAKE_CXX_STANDARD ${CPP_STANDARD#c++})\nset(CMAKE_CXX_STANDARD_REQUIRED ON)\nset(CMAKE_CXX_EXTENSIONS OFF)"
+  elif [[ "$LANG_CHOICE" == "both" ]]; then
+    std_config="set(CMAKE_C_STANDARD $c_std_value)\nset(CMAKE_C_STANDARD_REQUIRED ON)\nset(CMAKE_C_EXTENSIONS OFF)\nset(CMAKE_CXX_STANDARD ${CPP_STANDARD#c++})\nset(CMAKE_CXX_STANDARD_REQUIRED ON)\nset(CMAKE_CXX_EXTENSIONS OFF)"
+  fi
 
   content="${content//\{PROJECT_NAME\}/$PROJECT_NAME}"
   content="${content//\{LANG_LIST\}/$lang_list}"
   content="${content//\{STD_CONFIG\}/$std_config}"
+  content="${content//\{CMAKE_MIN\}/$cmake_min}"
 
   printf '%b\n' "$content" > "$PROJECT_DIR/CMakeLists.txt"
 }
 
 create_meson() {
   info "Generating Meson build files"
+
   local lang_list="'c'"
   local std_opts="'c_std=$C_STANDARD'"
   local sources="'main.c'"
-  local root_content src_content
+  local root_content
+  local src_content
 
   if [[ "$LANG_CHOICE" == "cpp" ]]; then
     lang_list="'cpp'"
@@ -927,12 +1724,43 @@ create_meson() {
   root_content="${root_content//\{PROJECT_NAME\}/$PROJECT_NAME}"
   root_content="${root_content//\{LANG_LIST\}/$lang_list}"
   root_content="${root_content//\{STD_OPTIONS\}/$std_opts}"
+
   printf '%s\n' "$root_content" > "$PROJECT_DIR/meson.build"
 
   src_content="$MESON_SRC_BASE"
   src_content="${src_content//\{PROJECT_NAME\}/$PROJECT_NAME}"
   src_content="${src_content//\{SOURCES\}/$sources}"
+
   printf '%s\n' "$src_content" > "$PROJECT_DIR/src/meson.build"
+}
+
+create_xmake() {
+  info "Generating xmake.lua"
+
+  local languages
+  local sources
+  local content="$XMAKE_BASE"
+
+  case "$LANG_CHOICE" in
+    c)
+      languages="\"$C_STANDARD\""
+      sources="\"src/**.c\""
+      ;;
+    cpp)
+      languages="\"$CPP_STANDARD\""
+      sources="\"src/**.cpp\""
+      ;;
+    both)
+      languages="\"$C_STANDARD\", \"$CPP_STANDARD\""
+      sources="\"src/**.c\", \"src/**.cpp\""
+      ;;
+  esac
+
+  content="${content//\{PROJECT_NAME\}/$PROJECT_NAME}"
+  content="${content//\{LANGUAGES\}/$languages}"
+  content="${content//\{SOURCES\}/$sources}"
+
+  printf '%s\n' "$content" > "$PROJECT_DIR/xmake.lua"
 }
 
 create_clang_format() {
@@ -966,7 +1794,9 @@ create_main() {
 create_traditional_zig() {
   info "Generating Zig 0.16 build system"
 
-  local source_file cpp_enabled flags
+  local source_file
+  local cpp_enabled
+  local flags
 
   if [[ "$LANG_CHOICE" == "c" ]]; then
     source_file="src/main.c"
@@ -1053,30 +1883,59 @@ fn createExecutable(
 EOF
 }
 
+create_build_system() {
+  case "$BUILD_SYSTEM" in
+    meson) create_meson ;;
+    cmake) create_cmake ;;
+    xmake) create_xmake ;;
+    zig) create_traditional_zig ;;
+    make) create_makefile ;;
+    none) ;;
+    *) die "Unknown build system: $BUILD_SYSTEM" ;;
+  esac
+}
+
 # ----------------------------------------------------
 # SAUCER PROJECT CREATION
 
 create_saucer_structure() {
   info "Creating Saucer desktop WebView structure in $PROJECT_DIR"
+
   mkdir -p "$PROJECT_DIR"/{src,include,frontend/tools,docs,external}
 
   cat > "$PROJECT_DIR/.gitignore" <<'EOF'
-zig-out/
-.zig-cache/
 build/
 compile_commands.json
+
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
 frontend/.cache/
+
 .vscode/
 .idea/
-.zed/
+
 *.o
+*.obj
 *.a
 *.so
+*.dylib
+*.dll
 *.exe
 EOF
+
+  if ! $USE_ZED_SETTINGS; then
+    cat >> "$PROJECT_DIR/.gitignore" <<'EOF'
+.zed/
+EOF
+  fi
+
+  if [[ "$SAUCER_BUILD_SYSTEM" == "zig-cmake" ]]; then
+    cat >> "$PROJECT_DIR/.gitignore" <<'EOF'
+zig-out/
+.zig-cache/
+EOF
+  fi
 }
 
 create_saucer_main() {
@@ -1091,16 +1950,21 @@ create_saucer_main() {
 
 create_saucer_cmake_native() {
   info "Generating Saucer CMake + Ninja configuration"
+
   local content="${SAUCER_CMAKE_NATIVE//\{PROJECT_NAME\}/$PROJECT_NAME}"
+
   printf '%s\n' "$content" > "$PROJECT_DIR/CMakeLists.txt"
   printf '%s\n' "$SAUCER_CLANGD_NATIVE" > "$PROJECT_DIR/.clangd"
 }
 
 create_saucer_cmake_zig() {
   info "Generating Saucer Zig + CMake + Ninja configuration"
+
   local content="${SAUCER_CMAKE_ZIG//\{PROJECT_NAME\}/$PROJECT_NAME}"
+
   printf '%s\n' "$content" > "$PROJECT_DIR/CMakeLists.txt"
   printf '%s\n' "$SAUCER_CLANGD_ZIG" > "$PROJECT_DIR/.clangd"
+
   create_saucer_zig_build
 }
 
@@ -1117,7 +1981,8 @@ create_saucer_dev_script() {
 }
 
 create_saucer_zig_build() {
-  local frontend_build runtime_exec
+  local frontend_build
+  local runtime_exec
 
   case "$FRONTEND_RUNTIME" in
     bun)
@@ -1136,7 +2001,9 @@ create_saucer_zig_build() {
       frontend_build='"yarn", "run", "build"'
       runtime_exec='"node", "frontend/tools/dev.mjs"'
       ;;
-    *) die "Unknown frontend runtime: $FRONTEND_RUNTIME" ;;
+    *)
+      die "Unknown frontend runtime: $FRONTEND_RUNTIME"
+      ;;
   esac
 
   cat > "$PROJECT_DIR/build.zig" <<EOF
@@ -1327,17 +2194,26 @@ EOF
 }
 
 create_saucer_readme() {
-  local build_cmd install_cmd vite_cmd
+  local build_cmd
+  local install_cmd
+  local vite_cmd
+
   build_cmd=$(runtime_build_command)
   install_cmd=$(runtime_install_command)
   vite_cmd=$(runtime_vite_command)
 
-  cat > "$PROJECT_DIR/README.md" <<EOF
-# $PROJECT_NAME
+  {
+    printf '# %s\n\n' "$PROJECT_NAME"
+    printf 'Saucer desktop WebView application with a Vite frontend.\n'
 
-Saucer desktop WebView application with a Vite frontend.
+    local byline
+    byline="$(author_line)"
+    if [[ -n "$byline" ]]; then
+      printf '\n%s\n' "$byline"
+    fi
+  } > "$PROJECT_DIR/README.md"
 
-Created by $AUTHOR_NAME <$AUTHOR_EMAIL>
+  cat >> "$PROJECT_DIR/README.md" <<EOF
 
 ## Frontend initialization
 
@@ -1417,7 +2293,9 @@ EOF
 }
 
 print_saucer_next_steps() {
-  local vite_cmd install_cmd
+  local vite_cmd
+  local install_cmd
+
   vite_cmd=$(runtime_vite_command)
   install_cmd=$(runtime_install_command)
 
@@ -1426,6 +2304,7 @@ print_saucer_next_steps() {
   echo "  cd \"$PROJECT_DIR/frontend\""
   echo "  $vite_cmd"
   echo "  $install_cmd"
+
   warn "frontend/tools/dev.mjs already exists. If create-vite warns that the directory is not empty, keep/ignore existing files; do not delete tools/."
 
   if [[ "$SAUCER_BUILD_SYSTEM" == "zig-cmake" ]]; then
@@ -1448,40 +2327,27 @@ print_saucer_next_steps() {
 git_init() {
   if $USE_GIT; then
     info "Initializing Git repository in $PROJECT_DIR"
+    mkdir -p "$PROJECT_DIR"
     (cd "$PROJECT_DIR" && git init)
   fi
 }
 
 # ----------------------------------------------------
-# PIPELINES
+# EXECUTION
 
-pipeline_traditional_full() {
-  ask_language
-  ask_build_system
-  ask_git
-  ask_format
-  ask_standards
-  ask_author
-
+execute_traditional_full() {
   create_traditional_structure
-  $USE_MESON && create_meson
-  $USE_MAKE && create_makefile
-  $USE_CMAKE && create_cmake
-  $USE_ZIG && create_traditional_zig
+  create_build_system
+
   $USE_CLANG_FORMAT && create_clang_format
   $USE_ZED_SETTINGS && create_zed_settings
   $USE_CLANG_TIDY && create_clang_tidy
+
   create_main
   git_init
 }
 
-pipeline_saucer_full() {
-  ask_saucer_build_system
-  ask_frontend_runtime
-  ask_git
-  ask_format
-  ask_author
-
+execute_saucer_full() {
   create_saucer_structure
   create_saucer_main
   create_saucer_dev_script
@@ -1501,39 +2367,35 @@ pipeline_saucer_full() {
   print_saucer_next_steps
 }
 
-pipeline_full() {
-  ask_project_kind
-
+execute_full() {
   if [[ "$PROJECT_KIND" == "saucer" ]]; then
-    pipeline_saucer_full
+    execute_saucer_full
   else
-    pipeline_traditional_full
+    execute_traditional_full
   fi
 }
 
-pipeline_build() {
-  ask_language
-  ask_build_system
+execute_build() {
   mkdir -p "$PROJECT_DIR"/{src,include}
-  $USE_MESON && create_meson
-  $USE_MAKE && create_makefile
-  $USE_CMAKE && create_cmake
-  $USE_ZIG && create_traditional_zig
+  create_build_system
 }
 
-pipeline_format() {
-  ask_language
-  ask_format
+execute_lang() {
+  mkdir -p "$PROJECT_DIR/src"
+  create_main
+}
+
+execute_format() {
   mkdir -p "$PROJECT_DIR"
+
   $USE_CLANG_FORMAT && create_clang_format
   $USE_ZED_SETTINGS && create_zed_settings
   $USE_CLANG_TIDY && create_clang_tidy
 }
 
-pipeline_lang() {
-  ask_language
-  mkdir -p "$PROJECT_DIR/src"
-  create_main
+execute_git() {
+  USE_GIT=true
+  git_init
 }
 
 # ----------------------------------------------------
@@ -1542,16 +2404,36 @@ pipeline_lang() {
 main() {
   parse_args "$@"
 
-  echo -e "${GREEN}=== Allman++ C/C++ Project Setup ===${NC}\n"
+  echo -e "${GREEN}=== Allman++ C/C++ Project Setup ===${NC}"
 
-  if $FLAG_FULL_SETUP; then
-    pipeline_full
-  else
-    if $FLAG_BUILD_ONLY; then pipeline_build; fi
-    if $FLAG_LANG_ONLY; then pipeline_lang; fi
-    if $FLAG_GIT_ONLY; then USE_GIT=true; git_init; fi
-    if $FLAG_FORMAT_ONLY; then pipeline_format; fi
+  case "$MODE" in
+    full) resolve_full_configuration ;;
+    build) resolve_build_configuration ;;
+    lang) resolve_lang_configuration ;;
+    format) resolve_format_configuration ;;
+    git) ;;
+    *) die "Unknown operation mode: $MODE" ;;
+  esac
+
+  print_plan
+  validate_environment
+
+  if $DRY_RUN; then
+    note "Dry run: no files were written."
+    exit 0
   fi
+
+  if [[ "$MODE" == "full" ]]; then
+    confirm_plan
+  fi
+
+  case "$MODE" in
+    full) execute_full ;;
+    build) execute_build ;;
+    lang) execute_lang ;;
+    format) execute_format ;;
+    git) execute_git ;;
+  esac
 
   info "Project operation completed successfully."
   echo "Location: $PROJECT_DIR"
